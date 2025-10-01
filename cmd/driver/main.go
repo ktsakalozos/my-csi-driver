@@ -2,18 +2,48 @@ package main
 
 import (
 	"flag"
-	"log"
+	"os"
 
-	"github.com/ktsakalozos/my-csi-driver/pkg"
+	"github.com/ktsakalozos/my-csi-driver/pkg/rawfile"
+	klog "k8s.io/klog/v2"
+)
+
+var (
+	endpoint        = flag.String("endpoint", "unix:///var/lib/kubelet/plugins/my-csi-driver/csi.sock", "CSI endpoint")
+	nodeID          = flag.String("nodeid", "", "node id")
+	driverName      = flag.String("drivername", "my-csi-driver", "name of the driver")
+	workingMountDir = flag.String("working-mount-dir", "/var/lib/my-csi-driver", "directory for image files backing the volumes")
 )
 
 func main() {
-	var endpoint string
-	flag.StringVar(&endpoint, "endpoint", "/var/lib/kubelet/plugins/my-csi-driver/csi.sock", "CSI unix socket endpoint")
+	klog.InitFlags(nil)
+	_ = flag.Set("logtostderr", "true")
 	flag.Parse()
-
-	driver := pkg.NewMyCSIDriver("my-csi-driver", "0.1.0", "node-1")
-	if err := driver.Run(endpoint); err != nil {
-		log.Fatalf("driver exited: %v", err)
+	if *nodeID == "" {
+		klog.Warning("nodeid is empty")
 	}
+
+	handle()
+	os.Exit(0)
+}
+
+func handle() {
+	// Resolve backing directory with precedence: env -> flag -> default
+	backingDir := os.Getenv("CSI_BACKING_DIR")
+	if backingDir == "" {
+		if *workingMountDir != "" {
+			backingDir = *workingMountDir
+		} else {
+			backingDir = "/var/lib/my-csi-driver"
+		}
+	}
+
+	driverOptions := rawfile.DriverOptions{
+		NodeID:     *nodeID,
+		DriverName: *driverName,
+		Endpoint:   *endpoint,
+		BackingDir: backingDir,
+	}
+	d := rawfile.NewDriver(&driverOptions)
+	d.Run(false)
 }

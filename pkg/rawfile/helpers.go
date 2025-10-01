@@ -1,7 +1,8 @@
-package pkg
+package rawfile
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
 )
 
@@ -69,7 +70,14 @@ func SplitFields(s string) []string {
 	return fields
 }
 
-// Helper: check if substring is in string
+// Helper: check if substring is in string (naive)
 func Contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || (len(s) > len(substr) && (s[0:len(substr)] == substr || Contains(s[1:], substr))))
+}
+
+// Helper: run command and return output
+func execCommand(name string, args ...string) ([]byte, error) {
+	log.Printf("execCommand: %s %v", name, args)
+	cmd := exec.Command(name, args...)
+	return cmd.CombinedOutput()
 }

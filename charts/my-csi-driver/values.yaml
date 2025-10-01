@@ -1,0 +1,29 @@
+image:
+  repository: kjackal/my-csi-driver
+  tag: latest
+  pullPolicy: IfNotPresent
+
+controller:
+  enabled: true
+
+node:
+  registrarImage: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.10.1
+  provisionerImage: registry.k8s.io/sig-storage/csi-provisioner:v5.0.1
+  logLevel: 2
+
+resources: {}
+
+serviceAccount:
+  create: true
+  name: ""
+
+storageClass:
+  create: true
+  name: my-csi-driver-default
+  default: true
+  reclaimPolicy: Delete
+  volumeBindingMode: WaitForFirstConsumer
+  allowVolumeExpansion: false
+
+# Backing directory for dynamically provisioned volumes
+backingDir: /var/lib/my-csi-driver

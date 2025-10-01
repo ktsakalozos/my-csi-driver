@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "my-csi-driver.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
+    spec:
+      serviceAccountName: {{ include "my-csi-driver.serviceAccountName" . }}
+      containers:
+        - name: driver
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--endpoint=unix:///var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}/csi.sock"
+            - "--nodeid=$(NODE_NAME)"
+            - "--drivername={{ include "my-csi-driver.fullname" . }}"
+          securityContext:
+            privileged: true
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CSI_BACKING_DIR
+              value: {{ .Values.backingDir | quote }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}
+            - name: mountpoint-dir
+              mountPath: /var/lib/kubelet
+              mountPropagation: Bidirectional
+            - name: data-dir
+              mountPath: {{ .Values.backingDir }}
+        - name: node-driver-registrar
+          image: {{ .Values.node.registrarImage }}
+          args:
+            - --csi-address=$(ADDRESS)
+            - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+            - --health-port=9809
+          env:
+            - name: ADDRESS
+              value: /var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}/csi.sock
+            - name: DRIVER_REG_SOCK_PATH
+              value: /var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}/csi.sock
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9809
+            initialDelaySeconds: 5
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}
+            - name: registration-dir
+              mountPath: /registration
+        - name: external-provisioner
+          image: {{ .Values.node.provisionerImage }}
+          args:
+            - --csi-address=$(ADDRESS)
+            - --feature-gates=Topology=true
+            - --strict-topology
+            - --immediate-topology=false
+            - --timeout=120s
+            - --enable-capacity=true
+            - --capacity-ownerref-level=1
+          env:
+            - name: ADDRESS
+              value: /var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}/csi.sock
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}
+            type: DirectoryOrCreate
+        - name: mountpoint-dir
+          hostPath:
+            path: /var/lib/kubelet
+            type: DirectoryOrCreate
+        - name: data-dir
+          hostPath:
+            path: {{ .Values.backingDir }}
+            type: DirectoryOrCreate
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: Directory

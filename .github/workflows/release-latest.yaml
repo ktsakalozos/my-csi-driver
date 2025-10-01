@@ -1,0 +1,75 @@
+name: release-latest
+
+on:
+  workflow_run:
+    workflows: ["ci-tests", "e2e-kind"]
+    types: [completed]
+
+jobs:
+  release:
+    # Only proceed when the triggering workflow concluded successfully, was for a push on main
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+    env:
+      OWNER: ${{ github.repository_owner }}
+      REPO: ${{ github.event.repository.name }}
+      REGISTRY: ghcr.io/${{ github.repository_owner }}
+      IMAGE_NAME: my-csi-driver
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify required workflows succeeded
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = context.payload.workflow_run.head_sha;
+            async function passed(workflowFile) {
+              const res = await github.rest.actions.listWorkflowRuns({
+                owner, repo, workflow_id: workflowFile, head_sha: sha,
+                per_page: 5
+              });
+              if (!res.data.workflow_runs || res.data.workflow_runs.length === 0) return false;
+              // Find the run for this sha with a successful conclusion
+              return res.data.workflow_runs.some(r => r.head_sha === sha && r.conclusion === 'success');
+            }
+            const testsOk = await passed('ci-tests.yaml');
+            const e2eOk = await passed('e2e-kind.yaml');
+            core.info(`ci-tests success: ${testsOk}`);
+            core.info(`e2e-kind success: ${e2eOk}`);
+            core.setOutput('all_passed', (testsOk && e2eOk) ? 'true' : 'false');
+
+      - name: Abort if checks not all passed
+        if: steps.check.outputs.all_passed != 'true'
+        run: |
+          echo "Required workflows not all successful for $SHA; skipping release." && exit 0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ env.OWNER }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Retag SHA image as latest
+        run: |
+          set -euo pipefail
+          SRC_IMAGE=${REGISTRY}/${IMAGE_NAME}:${SHA}
+          LATEST_IMAGE=${REGISTRY}/${IMAGE_NAME}:latest
+          echo "Pulling $SRC_IMAGE"
+          docker pull "$SRC_IMAGE"
+          echo "Tagging as $LATEST_IMAGE"
+          docker tag "$SRC_IMAGE" "$LATEST_IMAGE"
+          echo "Pushing $LATEST_IMAGE"
+          docker push "$LATEST_IMAGE"
