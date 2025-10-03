@@ -60,7 +60,7 @@ spec:
       serviceAccountName: my-csi-driver-sa
       containers:
         - name: my-csi-driver
-          image: kjackal/my-csi-driver:latest
+          image: ghcr.io/ktsakalozos/my-csi-driver:latest
           args:
             - "--endpoint=/var/lib/kubelet/plugins/my-csi-driver/csi.sock"
           securityContext:
