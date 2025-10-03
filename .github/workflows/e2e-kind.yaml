@@ -46,6 +46,12 @@ jobs:
         run: |
           make build IMG=$IMG
 
+      - name: Push image to GHCR (push events only)
+        # if we merge a PR to main we will trigger a 'push' event and the image will be pushed to GHCR
+        if: github.event_name == 'push'
+        run: |
+          make push IMG=$IMG
+
       - name: Create kind cluster
         uses: helm/kind-action@v1
         with:
