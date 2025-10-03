@@ -1,0 +1,147 @@
+name: e2e-kind
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMG: ghcr.io/${{ github.repository_owner }}/my-csi-driver:${{ github.sha }}
+      REGISTRY: ghcr.io/${{ github.repository_owner }}
+      KIND_CLUSTER_NAME: csi-e2e
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.30.0
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.15.2
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image
+        run: |
+          make build IMG=$IMG
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+
+      - name: Remove Rancher local-path provisioner and StorageClass
+        run: |
+          # Delete any StorageClasses backed by rancher.io/local-path
+          kubectl get sc -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.provisioner}{"\n"}{end}' \
+            | awk '$2=="rancher.io/local-path"{print $1}' \
+            | xargs -r -n1 kubectl delete storageclass
+
+          # Delete the local-path-provisioner deployment if present so it doesn't recreate the SC
+          kubectl delete deploy -n kube-system local-path-provisioner --ignore-not-found=true
+
+          # As a final guard, remove default annotation from any remaining StorageClasses
+          for sc in $(kubectl get storageclass -o name); do
+            kubectl annotate "$sc" storageclass.kubernetes.io/is-default-class- --overwrite || true
+          done
+
+      - name: Load image into kind
+        run: |
+          kind load docker-image $IMG --name $KIND_CLUSTER_NAME
+
+      - name: Install CSI driver via Helm
+        run: |
+          helm upgrade --install my-csi-driver ./charts/my-csi-driver \
+            --set image.repository=$REGISTRY/my-csi-driver \
+            --set image.tag=${{ github.sha }} \
+            --set storageClass.create=true \
+            --set storageClass.default=true \
+            --set backingDir=/var/lib/my-csi-driver
+
+      - name: Wait for DaemonSet ready
+        run: |
+          kubectl -n default rollout status ds/my-csi-driver --timeout=320s
+
+      - name: Verify StorageClass exists
+        run: |
+          kubectl get storageclass
+          kubectl get storageclass my-csi-driver-default -o yaml
+
+      - name: Deploy dynamic provisioning test pod (PVC + Pod)
+        run: |
+          cat <<'YAML' > /tmp/pvc-pod.yaml
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: demo-pvc
+          spec:
+            accessModes: [ "ReadWriteOnce" ]
+            storageClassName: my-csi-driver-default
+            resources:
+              requests:
+                storage: 1Mi
+          ---
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: demo-app
+          spec:
+            restartPolicy: Never
+            containers:
+            - name: app
+              image: alpine:3.19
+              command: ["/bin/sh","-c","echo hello > /data/hello && cat /data/hello && sleep 2"]
+              volumeMounts:
+              - name: data
+                mountPath: /data
+            volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: demo-pvc
+          YAML
+          kubectl apply -f /tmp/pvc-pod.yaml
+
+      - name: Wait for PVC bound
+        run: |
+          kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/demo-pvc --timeout=320s
+
+      - name: Wait for Pod completion (phase=Succeeded)
+        run: |
+          set -e
+          # Wait up to 5 minutes for the pod to complete successfully
+          if ! kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/demo-app --timeout=300s; then
+            echo "Pod did not reach Succeeded in time; dumping diagnostics..."
+            kubectl get pod demo-app -o yaml || true
+            kubectl describe pod demo-app || true
+            kubectl logs pod/demo-app || true
+            exit 1
+          fi
+          echo "Pod completed successfully"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kubectl delete -f /tmp/pvc-pod.yaml --ignore-not-found=true
+          helm uninstall my-csi-driver || true
+          kind delete cluster --name $KIND_CLUSTER_NAME || true

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: my-csi-driver
+description: A simple CSI driver Helm chart
+version: 0.1.0
+appVersion: 0.1.0
+type: application

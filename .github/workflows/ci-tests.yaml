@@ -1,0 +1,49 @@
+name: ci-tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  unit-and-integration:
+    name: Unit and Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Cache Go build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Go env
+        run: |
+          go env
+
+      - name: Run unit tests (make test)
+        run: |
+          make test
+
+      - name: Install csc (csi-cli) for integration tests
+        run: |
+          GO111MODULE=on go install github.com/rexray/gocsi/csc@latest
+
+      - name: Run integration tests (make integration-test)
+        env:
+          PATH: ${{ env.PATH }}:${{ env.GOPATH }}/bin:${{ runner.tool_cache }}/go/bin:~/go/bin
+        run: |
+          which csc || true
+          make integration-test
