@@ -126,16 +126,18 @@ jobs:
         run: |
           kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/demo-pvc --timeout=320s
 
-      - name: Wait for Pod succeeded
+      - name: Wait for Pod completion (phase=Succeeded)
         run: |
-          kubectl wait --for=condition=Ready pod/demo-app --timeout=320s || true
-          kubectl logs pod/demo-app
-
-      - name: Assert pod completed successfully
-        run: |
-          PHASE=$(kubectl get pod demo-app -o jsonpath='{.status.phase}')
-          echo "Pod phase: $PHASE"
-          test "$PHASE" = "Succeeded"
+          set -e
+          # Wait up to 5 minutes for the pod to complete successfully
+          if ! kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/demo-app --timeout=300s; then
+            echo "Pod did not reach Succeeded in time; dumping diagnostics..."
+            kubectl get pod demo-app -o yaml || true
+            kubectl describe pod demo-app || true
+            kubectl logs pod/demo-app || true
+            exit 1
+          fi
+          echo "Pod completed successfully"
 
       - name: Cleanup
         if: always()
