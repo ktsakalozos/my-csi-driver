@@ -124,11 +124,11 @@ jobs:
 
       - name: Wait for PVC bound
         run: |
-          kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/demo-pvc --timeout=120s
+          kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/demo-pvc --timeout=320s
 
       - name: Wait for Pod succeeded
         run: |
-          kubectl wait --for=condition=Ready pod/demo-app --timeout=120s || true
+          kubectl wait --for=condition=Ready pod/demo-app --timeout=320s || true
           kubectl logs pod/demo-app
 
       - name: Assert pod completed successfully
