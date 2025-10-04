@@ -102,9 +102,6 @@ jobs:
         run: |
           kubectl -n default rollout status deploy/my-csi-driver-controller --timeout=320s
 
-      - name: Add tmate session (debugging)
-        uses: mxschmitt/action-tmate@v3
-
       - name: Verify controller and node modes
         run: |
           set -x

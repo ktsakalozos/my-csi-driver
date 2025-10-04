@@ -63,8 +63,18 @@ spec:
           image: ghcr.io/ktsakalozos/my-csi-driver:latest
           args:
             - "--endpoint=unix:///var/lib/kubelet/plugins/my-csi-driver/csi.sock"
+            - "--nodeid=$(NODE_NAME)"
+            - "--drivername=my-csi-driver"
+            - "--mode=both"
           securityContext:
             privileged: true
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CSI_BACKING_DIR
+              value: /var/lib/my-csi-driver
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/kubelet/plugins/my-csi-driver
