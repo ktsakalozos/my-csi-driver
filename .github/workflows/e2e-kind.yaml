@@ -89,6 +89,20 @@ jobs:
         run: |
           kubectl -n default rollout status ds/my-csi-driver --timeout=320s
 
+      - name: Wait for Controller Deployment ready
+        run: |
+          kubectl -n default rollout status deploy/my-csi-driver-controller --timeout=320s
+
+      - name: Verify controller and node modes
+        run: |
+          echo "Checking controller pod args include --mode=controller";
+          CTRL_POD=$(kubectl get pods -l app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.name}')
+          kubectl get pod "$CTRL_POD" -o jsonpath='{.spec.containers[0].args}' | grep -- '--mode=controller'
+          echo "Checking node daemonset pod args include --mode=node";
+          NODE_POD=$(kubectl get pods -l app.kubernetes.io/name=my-csi-driver -o jsonpath='{.items[0].metadata.name}')
+          kubectl get pod "$NODE_POD" -o jsonpath='{.spec.containers[0].args}' | grep -- '--mode=node'
+          echo "Controller and node mode arguments verified."
+
       - name: Verify StorageClass exists
         run: |
           kubectl get storageclass

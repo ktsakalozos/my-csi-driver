@@ -11,9 +11,12 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
-// findProjectRoot returns the repo root by walking up from CWD until it finds go.mod
 func findProjectRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -30,7 +33,6 @@ func findProjectRoot(t *testing.T) string {
 	return ""
 }
 
-// buildBinary builds cmd/driver and returns the path to the binary
 func buildBinary(t *testing.T, root string) string {
 	t.Helper()
 	bin := filepath.Join(root, "bin", "my-csi-driver-test")
@@ -45,37 +47,33 @@ func buildBinary(t *testing.T, root string) string {
 	return bin
 }
 
-func TestCSI_Identity_And_Controller(t *testing.T) {
+// Controller-only integration test
+func TestCSI_Controller(t *testing.T) {
 	root := findProjectRoot(t)
 	bin := buildBinary(t, root)
 
-	// Use a test socket under tmp
-	sockDir := filepath.Join(os.TempDir(), "csi-test")
+	sockDir := filepath.Join(os.TempDir(), "csi-test-controller")
 	_ = os.MkdirAll(sockDir, 0o755)
 	sock := filepath.Join(sockDir, "csi.sock")
 	endpoint := fmt.Sprintf("unix://%s", sock)
 
-	// Start the driver in background
+	backingDir := filepath.Join(os.TempDir(), "my-csi-driver-controller")
+	_ = os.MkdirAll(backingDir, 0o755)
+
 	driverCmd := exec.Command(bin,
 		"-endpoint", endpoint,
-		"-nodeid", "itest-node",
 		"-drivername", "itest-driver",
 		"-working-mount-dir", os.TempDir(),
+		"-mode", "controller",
 	)
-	driverCmd.Env = append(os.Environ(),
-		"CSI_BACKING_DIR="+filepath.Join(os.TempDir(), "my-csi-driver"),
-	)
+	driverCmd.Env = append(os.Environ(), "CSI_BACKING_DIR="+backingDir)
 	driverCmd.Stdout = os.Stdout
 	driverCmd.Stderr = os.Stderr
 	if err := driverCmd.Start(); err != nil {
-		t.Fatalf("failed to start driver: %v", err)
+		t.Fatalf("start controller driver: %v", err)
 	}
-	defer func() {
-		_ = driverCmd.Process.Kill()
-		_, _ = driverCmd.Process.Wait()
-	}()
+	defer func() { _ = driverCmd.Process.Kill(); _, _ = driverCmd.Process.Wait() }()
 
-	// Wait for socket to be created (basic readiness)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	for {
@@ -90,172 +88,200 @@ func TestCSI_Identity_And_Controller(t *testing.T) {
 		}
 	}
 READY:
-	// Small extra delay to allow gRPC to fully accept connections after socket appears
-	time.Sleep(3 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 
-	// Require csc (csi-cli) in PATH
 	if _, err := exec.LookPath("csc"); err != nil {
-		t.Skip("csc (csi-cli) not found in PATH; install it with 'go install github.com/rexray/gocsi/csc@latest', skipping integration test")
+		t.Skip("csc (csi-cli) not found; skipping controller test")
 	}
 
-	// csc identity plugin-info (with retry until the server is ready)
+	// Identity with retry
 	{
 		deadline := time.Now().Add(5 * time.Second)
-		var lastOut []byte
-		var lastErr error
+		var out []byte
+		var err error
 		for time.Now().Before(deadline) {
 			cmd := exec.Command("csc", "identity", "plugin-info", "--endpoint", endpoint)
-			out, err := cmd.CombinedOutput()
+			out, err = cmd.CombinedOutput()
 			if err == nil {
-				lastOut, lastErr = out, nil
 				break
 			}
-			lastOut, lastErr = out, err
 			time.Sleep(100 * time.Millisecond)
 		}
-		if lastErr != nil {
-			t.Fatalf("csc plugin-info failed after retries: %v\n%s", lastErr, string(lastOut))
+		if err != nil {
+			t.Fatalf("plugin-info failed: %v\n%s", err, string(out))
 		}
-		t.Logf("csc identity plugin-info output:\n%s", string(lastOut))
 	}
 
-	// csc controller get-capabilities
+	// Controller capabilities
 	{
 		cmd := exec.Command("csc", "controller", "get-capabilities", "--endpoint", endpoint)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("csc get-capabilities failed: %v\n%s", err, string(out))
+			t.Fatalf("get-capabilities failed: %v\n%s", err, string(out))
 		}
-		t.Logf("csc controller get-capabilities output:\n%s", string(out))
 	}
 
-	// Set the same backing dir as the driver and ensure it exists
-	backingDir := filepath.Join(os.TempDir(), "my-csi-driver")
-	_ = os.MkdirAll(backingDir, 0o755)
-
-	// Helper to list current .img files
-	listImgs := func(dir string) map[string]os.FileInfo {
-		files := map[string]os.FileInfo{}
-		entries, _ := os.ReadDir(dir)
-		for _, e := range entries {
-			name := e.Name()
-			if filepath.Ext(name) == ".img" {
-				if fi, err := e.Info(); err == nil {
-					files[name] = fi
-				}
+	listImgs := func(dir string) map[string]struct{} {
+		m := map[string]struct{}{}
+		ents, _ := os.ReadDir(dir)
+		for _, e := range ents {
+			if filepath.Ext(e.Name()) == ".img" {
+				m[e.Name()] = struct{}{}
 			}
 		}
-		return files
+		return m
 	}
-
-	// Create a volume via csc and verify the backing file appears
 	before := listImgs(backingDir)
+
 	volName := fmt.Sprintf("itest-%d", time.Now().UnixNano())
-	var createOut string
-	{
-		// ACCESS_MODE,ACCESS_TYPE[,FS_TYPE,MOUNT_FLAGS]
-		// Use SINGLE_NODE_WRITER + mount with ext4 fs
-		cmd := exec.Command("csc", "controller", "create-volume",
-			"--endpoint", endpoint,
-			"--cap", "SINGLE_NODE_WRITER,mount,ext4",
-			"--req-bytes", "1048576",
-			volName,
-		)
-		out, err := cmd.CombinedOutput()
-		createOut = string(out)
-		t.Logf("csc controller create-volume output:\n%s", createOut)
-		if err != nil {
-			t.Fatalf("csc create-volume failed: %v\n%s", err, string(out))
-		}
+	cmdCreate := exec.Command("csc", "controller", "create-volume", "--endpoint", endpoint, "--cap", "SINGLE_NODE_WRITER,mount,ext4", "--req-bytes", "1048576", volName)
+	createOut, err := cmdCreate.CombinedOutput()
+	if err != nil {
+		t.Fatalf("create-volume failed: %v\n%s", err, string(createOut))
 	}
 
-	// Determine created volume by diffing .img files
-	var createdVolID string
-	{
-		deadline := time.Now().Add(2 * time.Second)
-		for createdVolID == "" && time.Now().Before(deadline) {
-			after := listImgs(backingDir)
-			for name := range after {
-				if _, ok := before[name]; !ok {
-					// name is e.g. vol-<uuid>.img
-					base := name
-					if filepath.Ext(base) == ".img" {
-						base = base[:len(base)-len(".img")]
-					}
-					createdVolID = base
-					break
-				}
-			}
-			if createdVolID == "" {
-				time.Sleep(50 * time.Millisecond)
+	var volID string
+	deadline := time.Now().Add(2 * time.Second)
+	for volID == "" && time.Now().Before(deadline) {
+		after := listImgs(backingDir)
+		for name := range after {
+			if _, ok := before[name]; !ok {
+				volID = name[:len(name)-len(".img")]
+				break
 			}
 		}
-		if createdVolID == "" {
-			t.Fatalf("failed to detect created volume backing file in %s", backingDir)
+		if volID == "" {
+			time.Sleep(50 * time.Millisecond)
 		}
-		t.Logf("Detected created volume ID: %s", createdVolID)
+	}
+	if volID == "" {
+		t.Fatalf("created volume file not found")
+	}
+	backingFile := filepath.Join(backingDir, volID+".img")
+	fi, statErr := os.Stat(backingFile)
+	if statErr != nil {
+		t.Fatalf("backing file missing: %v", statErr)
+	}
+	if fi.Size() != 1048576 {
+		t.Fatalf("unexpected size %d", fi.Size())
 	}
 
-	// Verify details from create-volume output and filesystem
-	{
-		// Try to extract capacity and backingFile from createOut, falling back to expected path if needed
-		var backingFileFromOut string
-		var capFromOut int64 = 1048576
-		if i := len(createOut); i > 0 {
-			// naive parse for backingFile="..."
-			if idx := indexOf(createOut, "backingFile\"=\""); idx >= 0 {
-				s := createOut[idx+len("backingFile\"=\""):]
-				if j := indexOf(s, "\""); j >= 0 {
-					backingFileFromOut = s[:j]
-				}
+	cmdVal := exec.Command("csc", "controller", "validate-volume-capabilities", "--endpoint", endpoint, "--cap", "SINGLE_NODE_WRITER,mount,ext4", volID)
+	valOut, err := cmdVal.CombinedOutput()
+	if err != nil {
+		t.Fatalf("validate failed: %v\n%s", err, string(valOut))
+	}
+
+	cmdDel := exec.Command("csc", "controller", "delete-volume", "--endpoint", endpoint, volID)
+	delOut, err := cmdDel.CombinedOutput()
+	if err != nil {
+		t.Fatalf("delete-volume failed: %v\n%s", err, string(delOut))
+	}
+	if _, err := os.Stat(backingFile); err == nil {
+		t.Fatalf("backing file still exists")
+	}
+}
+
+// Node-only integration test
+func TestCSI_Node(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("node test requires root")
+	}
+	for _, tool := range []string{"losetup", "mkfs.ext4", "blkid", "mount", "umount"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("missing %s", tool)
+		}
+	}
+
+	root := findProjectRoot(t)
+	bin := buildBinary(t, root)
+
+	sockDir := filepath.Join(os.TempDir(), "csi-test-node")
+	_ = os.MkdirAll(sockDir, 0o755)
+	sock := filepath.Join(sockDir, "csi.sock")
+	endpoint := fmt.Sprintf("unix://%s", sock)
+
+	backingDir := filepath.Join(os.TempDir(), "my-csi-driver-node")
+	_ = os.MkdirAll(backingDir, 0o755)
+	volID := fmt.Sprintf("vol-node-%d", time.Now().UnixNano())
+	backingFile := filepath.Join(backingDir, volID+".img")
+	f, err := os.Create(backingFile)
+	if err != nil {
+		t.Fatalf("create backing file: %v", err)
+	}
+	if err := f.Truncate(1 << 20); err != nil {
+		t.Fatalf("truncate backing file: %v", err)
+	}
+	f.Close()
+
+	driverCmd := exec.Command(bin,
+		"-endpoint", endpoint,
+		"-drivername", "itest-driver",
+		"-nodeid", "itest-node",
+		"-working-mount-dir", os.TempDir(),
+		"-mode", "node",
+	)
+	driverCmd.Env = append(os.Environ(), "CSI_BACKING_DIR="+backingDir)
+	driverCmd.Stdout = os.Stdout
+	driverCmd.Stderr = os.Stderr
+	if err := driverCmd.Start(); err != nil {
+		t.Fatalf("start node driver: %v", err)
+	}
+	defer func() { _ = driverCmd.Process.Kill(); _, _ = driverCmd.Process.Wait() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("socket not ready: %v", ctx.Err())
+		default:
+			if _, err := os.Stat(sock); err == nil {
+				goto READY
 			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		expectedBacking := filepath.Join(backingDir, createdVolID+".img")
-		if backingFileFromOut == "" {
-			backingFileFromOut = expectedBacking
-		}
-		fi, err := os.Stat(backingFileFromOut)
-		if err != nil {
-			t.Fatalf("backing file not found: %s: %v", backingFileFromOut, err)
-		}
-		if fi.Size() != capFromOut {
-			t.Fatalf("unexpected backing file size: got %d, want %d", fi.Size(), capFromOut)
-		}
-		// Validate volume capabilities as a proxy check that the volume id is accepted by the controller
-		vcmd := exec.Command("csc", "controller", "validate-volume-capabilities",
-			"--endpoint", endpoint,
-			"--cap", "SINGLE_NODE_WRITER,mount,ext4",
-			createdVolID,
-		)
-		vOut, vErr := vcmd.CombinedOutput()
-		t.Logf("csc controller validate-volume-capabilities output:\n%s", string(vOut))
-		if vErr != nil {
-			t.Fatalf("csc validate-volume-capabilities failed: %v\n%s", vErr, string(vOut))
+	}
+READY:
+	time.Sleep(300 * time.Millisecond)
+
+	conn, err := grpc.DialContext(context.Background(), endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial node: %v", err)
+	}
+	defer conn.Close()
+	nc := csi.NewNodeClient(conn)
+
+	targetPath := filepath.Join(os.TempDir(), fmt.Sprintf("csi-target-node-%d", time.Now().UnixNano()))
+	if err := os.MkdirAll(targetPath, 0o750); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+
+	capability := &csi.VolumeCapability{
+		AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{FsType: "ext4"}},
+		AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER},
+	}
+	pubReq := &csi.NodePublishVolumeRequest{VolumeId: volID, TargetPath: targetPath, VolumeCapability: capability, VolumeContext: map[string]string{"backingFile": backingFile}}
+	if _, err := nc.NodePublishVolume(context.Background(), pubReq); err != nil {
+		t.Fatalf("NodePublishVolume failed: %v", err)
+	}
+
+	if data, err := os.ReadFile("/proc/mounts"); err == nil {
+		if indexOf(string(data), targetPath) < 0 {
+			t.Fatalf("target path not mounted: %s", targetPath)
 		}
 	}
 
-	// Delete the volume via csc and verify the backing file is removed
-	{
-		cmd := exec.Command("csc", "controller", "delete-volume",
-			"--endpoint", endpoint,
-			createdVolID,
-		)
-		out, err := cmd.CombinedOutput()
-		t.Logf("csc controller delete-volume output:\n%s", string(out))
-		if err != nil {
-			t.Fatalf("csc delete-volume failed: %v\n%s", err, string(out))
-		}
+	if _, err := nc.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{VolumeId: volID, TargetPath: targetPath}); err != nil {
+		t.Fatalf("NodeUnpublishVolume failed: %v", err)
 	}
-
-	// Ensure file is gone
-	{
-		if _, err := os.Stat(filepath.Join(backingDir, createdVolID+".img")); err == nil {
-			t.Fatalf("backing file still exists after deletion: %s", createdVolID+".img")
+	if data, err := os.ReadFile("/proc/mounts"); err == nil {
+		if indexOf(string(data), targetPath) >= 0 {
+			t.Fatalf("target path still mounted: %s", targetPath)
 		}
 	}
 }
 
-// indexOf is a small helper to avoid strings import churn above
 func indexOf(s, sub string) int {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

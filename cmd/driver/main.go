@@ -13,6 +13,7 @@ var (
 	nodeID          = flag.String("nodeid", "", "node id")
 	driverName      = flag.String("drivername", "my-csi-driver", "name of the driver")
 	workingMountDir = flag.String("working-mount-dir", "/var/lib/my-csi-driver", "directory for image files backing the volumes")
+	mode            = flag.String("mode", "both", "driver mode: controller | node | both")
 )
 
 func main() {
@@ -43,6 +44,7 @@ func handle() {
 		DriverName: *driverName,
 		Endpoint:   *endpoint,
 		BackingDir: backingDir,
+		Mode:       *mode,
 	}
 	d := rawfile.NewDriver(&driverOptions)
 	d.Run(false)

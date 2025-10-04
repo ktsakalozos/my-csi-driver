@@ -1,6 +1,7 @@
 package rawfile
 
 import (
+	"github.com/container-storage-interface/spec/lib/go/csi"
 	"k8s.io/klog/v2"
 )
 
@@ -11,6 +12,7 @@ type DriverOptions struct {
 	Endpoint                     string
 	MountPermissions             uint64
 	BackingDir                   string
+	Mode                         string
 	DefaultOnDeletePolicy        string
 	VolStatsCacheExpireInMinutes int
 	RemoveArchivedVolumePath     bool
@@ -23,6 +25,7 @@ type Driver struct {
 	version    string
 	endpoint   string
 	backingDir string
+	mode       string
 }
 
 func NewDriver(options *DriverOptions) *Driver {
@@ -34,6 +37,7 @@ func NewDriver(options *DriverOptions) *Driver {
 		nodeID:     options.NodeID,
 		endpoint:   options.Endpoint,
 		backingDir: options.BackingDir,
+		mode:       options.Mode,
 	}
 
 	return d
@@ -44,10 +48,21 @@ func (d *Driver) Run(testMode bool) {
 	klog.V(2).Infof("Starting CSI driver %s at %s", d.name, d.endpoint)
 
 	s := NewNonBlockingGRPCServer()
+
+	// Decide which servers to run based on mode
+	var csServer csi.ControllerServer
+	var nsServer csi.NodeServer
+	if d.mode == "controller" || d.mode == "both" {
+		csServer = NewControllerServerWithBackingDir(d.name, d.version, d.backingDir)
+	}
+	if d.mode == "node" || d.mode == "both" {
+		nsServer = NewNodeServer(d.nodeID)
+	}
+
 	s.Start(d.endpoint,
 		NewIdentityServer(d.name, d.version),
-		NewControllerServerWithBackingDir(d.name, d.version, d.backingDir),
-		NewNodeServer(d.nodeID),
+		csServer,
+		nsServer,
 		testMode)
 	s.Wait()
 }
