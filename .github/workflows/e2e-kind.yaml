@@ -115,6 +115,21 @@ jobs:
           kubectl get pod "$NODE_POD" -o jsonpath='{.spec.containers[0].args}' | grep -- '--mode=node'
           echo "Controller and node mode arguments verified."
 
+      - name: Verify split ServiceAccounts and RBAC artifacts
+        run: |
+          echo "Listing service accounts"; kubectl get sa
+          kubectl get sa my-csi-driver-controller || (echo 'missing controller SA' && exit 1)
+          kubectl get sa my-csi-driver-node || (echo 'missing node SA' && exit 1)
+          echo "Checking that a leader election Lease is created (may take a few seconds)";
+          for i in {1..10}; do kubectl get lease my-csi-driver && break || sleep 2; done
+          kubectl get lease my-csi-driver || (echo 'Lease my-csi-driver not found' && exit 1)
+          echo "Lease found.";
+          echo "Checking CSIStorageCapacity objects (non-fatal if empty but should exist with --enable-capacity=true)";
+          kubectl get csistoragecapacities.storage.k8s.io || true
+          # Basic permission tests
+          echo "Attempting to read storageclasses (controller perms)"; kubectl get storageclasses || true
+          echo "RBAC verification step completed"
+
       - name: Verify StorageClass exists
         run: |
           kubectl get storageclass
