@@ -13,7 +13,7 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
     spec:
-  serviceAccountName: {{ include "my-csi-driver.fullname" . }}-node
+      serviceAccountName: {{ include "my-csi-driver.fullname" . }}-node
       containers:
         - name: driver
           image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
