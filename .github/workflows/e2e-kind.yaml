@@ -107,6 +107,7 @@ jobs:
 
       - name: Verify controller and node modes
         run: |
+          set -x
           echo "Checking controller pod args include --mode=controller";
           CTRL_POD=$(kubectl get pods -l app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.name}')
           kubectl get pod "$CTRL_POD" -o jsonpath='{.spec.containers[0].args}' | grep -- '--mode=controller'

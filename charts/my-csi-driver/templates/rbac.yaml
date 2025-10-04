@@ -11,6 +11,10 @@ rules:
   - apiGroups: [""]
     resources: ["persistentvolumes", "persistentvolumeclaims", "events"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Read-only access to its own Pod object (owner ref / capacity ownerref resolution) and Nodes (topology / capacity)
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses", "csistoragecapacities", "volumeattachments", "csinodes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
