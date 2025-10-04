@@ -21,7 +21,16 @@ func main() {
 	_ = flag.Set("logtostderr", "true")
 	flag.Parse()
 	if *nodeID == "" {
-		klog.Warning("nodeid is empty")
+		// Backwards compatibility fallback: try NODE_NAME env (typical Downward API) then hostname
+		if envNode := os.Getenv("NODE_NAME"); envNode != "" {
+			*nodeID = envNode
+			klog.Infof("nodeid flag not set; using NODE_NAME env: %s", *nodeID)
+		} else if hn, err := os.Hostname(); err == nil && hn != "" {
+			*nodeID = hn
+			klog.Infof("nodeid flag not set; using hostname: %s", *nodeID)
+		} else {
+			klog.Warning("nodeid is empty (no flag, NODE_NAME env, or hostname available)")
+		}
 	}
 
 	handle()
