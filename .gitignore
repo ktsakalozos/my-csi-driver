@@ -6,7 +6,6 @@ bin/
 *.dylib
 *.test
 *.out
-my-csi-driver
 
 # Dependency directories
 vendor/

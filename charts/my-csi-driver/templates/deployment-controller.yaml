@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "my-csi-driver.fullname" . }}-controller
+  labels:
+    app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
+    app.kubernetes.io/component: controller
+spec:
+  replicas: {{ .Values.controller.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
+        app.kubernetes.io/component: controller
+    spec:
+      serviceAccountName: {{ include "my-csi-driver.fullname" . }}-controller
+      containers:
+        - name: driver
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--endpoint=unix:///csi/csi.sock"
+            - "--drivername={{ include "my-csi-driver.fullname" . }}"
+            - "--mode=controller"
+          env:
+            - name: CSI_BACKING_DIR
+              value: {{ .Values.backingDir | quote }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            # Mount the same host backing directory used by node plugin so backing files are shared
+            - name: data-dir
+              mountPath: {{ .Values.backingDir }}
+        - name: external-provisioner
+          image: {{ .Values.controller.provisionerImage }}
+          args:
+            - --csi-address=/csi/csi.sock
+            - --feature-gates=Topology=true
+            - --timeout=120s
+            - --enable-capacity=true
+            - --capacity-ownerref-level=1
+            - --leader-election=true
+            - --leader-election-namespace=$(NAMESPACE)
+            - --v=2
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+      volumes:
+        - name: socket-dir
+          emptyDir: {}
+        - name: data-dir
+          hostPath:
+            path: {{ .Values.backingDir }}
+            type: DirectoryOrCreate

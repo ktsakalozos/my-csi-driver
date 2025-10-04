@@ -4,16 +4,19 @@ metadata:
   name: {{ include "my-csi-driver.fullname" . }}
   labels:
     app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
+    app.kubernetes.io/component: node
 spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
+      app.kubernetes.io/component: node
   template:
     metadata:
       labels:
         app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
+        app.kubernetes.io/component: node
     spec:
-      serviceAccountName: {{ include "my-csi-driver.serviceAccountName" . }}
+      serviceAccountName: {{ include "my-csi-driver.fullname" . }}-node
       containers:
         - name: driver
           image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
@@ -22,6 +25,7 @@ spec:
             - "--endpoint=unix:///var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}/csi.sock"
             - "--nodeid=$(NODE_NAME)"
             - "--drivername={{ include "my-csi-driver.fullname" . }}"
+            - "--mode=node"
           securityContext:
             privileged: true
           env:
@@ -39,6 +43,9 @@ spec:
               mountPropagation: Bidirectional
             - name: data-dir
               mountPath: {{ .Values.backingDir }}
+            # Host /dev for loop devices (losetup) – required for NodePublishVolume loop creation
+            - name: host-dev
+              mountPath: /dev
         - name: node-driver-registrar
           image: {{ .Values.node.registrarImage }}
           args:
@@ -61,34 +68,6 @@ spec:
               mountPath: /var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}
             - name: registration-dir
               mountPath: /registration
-        - name: external-provisioner
-          image: {{ .Values.node.provisionerImage }}
-          args:
-            - --csi-address=$(ADDRESS)
-            - --feature-gates=Topology=true
-            - --strict-topology
-            - --immediate-topology=false
-            - --timeout=120s
-            - --enable-capacity=true
-            - --capacity-ownerref-level=1
-          env:
-            - name: ADDRESS
-              value: /var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}/csi.sock
-            - name: NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-            - name: NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-          volumeMounts:
-            - name: socket-dir
-              mountPath: /var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}
       volumes:
         - name: socket-dir
           hostPath:
@@ -105,4 +84,8 @@ spec:
         - name: registration-dir
           hostPath:
             path: /var/lib/kubelet/plugins_registry
+            type: Directory
+        - name: host-dev
+          hostPath:
+            path: /dev
             type: Directory

@@ -7,5 +7,10 @@ spec:
   podInfoOnMount: true
   fsGroupPolicy: File
   storageCapacity: true
+  seLinuxMount: false
+  # Token requests allow node plugins / sidecars to project service account tokens if needed in future
+  tokenRequests:
+    - audience: api
+      expirationSeconds: 3600
   volumeLifecycleModes:
     - Persistent

@@ -62,7 +62,7 @@ spec:
         - name: my-csi-driver
           image: ghcr.io/ktsakalozos/my-csi-driver:latest
           args:
-            - "--endpoint=/var/lib/kubelet/plugins/my-csi-driver/csi.sock"
+            - "--endpoint=unix:///var/lib/kubelet/plugins/my-csi-driver/csi.sock"
           securityContext:
             privileged: true
           volumeMounts:

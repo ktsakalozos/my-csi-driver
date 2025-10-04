@@ -1,24 +1,68 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "my-csi-driver.fullname" . }}
+  name: {{ include "my-csi-driver.fullname" . }}-controller
+  labels:
+    app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
+    app.kubernetes.io/component: controller
 rules:
+  # Controller needs to manage PVs, PVCs, StorageClasses, CSIStorageCapacities, VolumeAttachments (read), events
   - apiGroups: [""]
-    resources: ["nodes", "pods", "persistentvolumes", "persistentvolumeclaims", "events"]
+    resources: ["persistentvolumes", "persistentvolumeclaims", "events"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Read-only access to its own Pod object (owner ref / capacity ownerref resolution) and Nodes (topology / capacity)
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["storage.k8s.io"]
-    resources: ["csinodes", "volumeattachments", "storageclasses", "csistoragecapacities"]
+    resources: ["storageclasses", "csistoragecapacities", "volumeattachments", "csinodes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "my-csi-driver.fullname" . }}
+  name: {{ include "my-csi-driver.fullname" . }}-controller
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "my-csi-driver.fullname" . }}
+  name: {{ include "my-csi-driver.fullname" . }}-controller
 subjects:
   - kind: ServiceAccount
-    name: {{ include "my-csi-driver.serviceAccountName" . }}
+    name: {{ include "my-csi-driver.fullname" . }}-controller
+    namespace: {{ .Release.Namespace }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "my-csi-driver.fullname" . }}-node
+  labels:
+    app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
+    app.kubernetes.io/component: node
+rules:
+  # Node plugin typically needs to read node object (for topology), interact with volumeattachments (get/list/watch)
+  - apiGroups: [""]
+    resources: ["nodes", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments", "csinodes"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "my-csi-driver.fullname" . }}-node
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "my-csi-driver.fullname" . }}-node
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "my-csi-driver.fullname" . }}-node
     namespace: {{ .Release.Namespace }}
