@@ -59,18 +59,27 @@ jobs:
 
       - name: Remove Rancher local-path provisioner and StorageClass
         run: |
-          # Delete any StorageClasses backed by rancher.io/local-path
+          set -euo pipefail
+          echo "Removing any StorageClasses using rancher.io/local-path provisioner..."
           kubectl get sc -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.provisioner}{"\n"}{end}' \
             | awk '$2=="rancher.io/local-path"{print $1}' \
             | xargs -r -n1 kubectl delete storageclass
 
-          # Delete the local-path-provisioner deployment if present so it doesn't recreate the SC
-          kubectl delete deploy -n kube-system local-path-provisioner --ignore-not-found=true
+          echo "Deleting local-path-provisioner Deployment (possible namespaces: local-path-storage, kube-system)..."
+          # Kind defaults to namespace local-path-storage; older setups or custom images might use kube-system
+          kubectl delete deployment.apps/local-path-provisioner -n local-path-storage --ignore-not-found=true
+          kubectl delete deployment.apps/local-path-provisioner -n kube-system --ignore-not-found=true
 
-          # As a final guard, remove default annotation from any remaining StorageClasses
+          echo "Waiting briefly for deployment removal..."
+          kubectl wait --for=delete deployment/local-path-provisioner -n local-path-storage --timeout=30s 2>/dev/null || true
+          kubectl wait --for=delete deployment/local-path-provisioner -n kube-system --timeout=30s 2>/dev/null || true
+
+          echo "Stripping default annotation from any remaining StorageClasses (safety guard)..."
           for sc in $(kubectl get storageclass -o name); do
             kubectl annotate "$sc" storageclass.kubernetes.io/is-default-class- --overwrite || true
           done
+
+          echo "Final StorageClass list after cleanup:" && kubectl get sc -o wide || true
 
       - name: Load image into kind
         run: |
