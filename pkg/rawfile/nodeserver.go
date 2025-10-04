@@ -36,6 +36,13 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	}
 	klog.Infof("NodePublishVolume backingFile: %s", backingFile)
 
+	// Ensure backing file exists on this node (controller may have created it on another node in multi-node clusters)
+	if fi, statErr := os.Stat(backingFile); statErr != nil {
+		return nil, fmt.Errorf("backing file %s not accessible on node: %v", backingFile, statErr)
+	} else if fi.Size() == 0 {
+		klog.Warningf("backing file %s has zero size; losetup may fail", backingFile)
+	}
+
 	// Set up loop device
 	loopDev, err := setupLoopDevice(backingFile)
 	if err != nil {
@@ -65,7 +72,8 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 func setupLoopDevice(backingFile string) (string, error) {
 	out, err := execCommand("losetup", "-f", "--show", backingFile)
 	if err != nil {
-		return "", err
+		// Include losetup combined output to aid debugging (e.g., missing /dev/loop-control, permission denied, ENOENT)
+		return "", fmt.Errorf("losetup failed for %s: %v: %s", backingFile, err, string(out))
 	}
 	// trim newline
 	if len(out) > 0 && out[len(out)-1] == '\n' {

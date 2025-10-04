@@ -40,6 +40,9 @@ spec:
               mountPropagation: Bidirectional
             - name: data-dir
               mountPath: {{ .Values.backingDir }}
+            # Host /dev for loop devices (losetup) – required for NodePublishVolume loop creation
+            - name: host-dev
+              mountPath: /dev
         - name: node-driver-registrar
           image: {{ .Values.node.registrarImage }}
           args:
@@ -78,4 +81,8 @@ spec:
         - name: registration-dir
           hostPath:
             path: /var/lib/kubelet/plugins_registry
+            type: Directory
+        - name: host-dev
+          hostPath:
+            path: /dev
             type: Directory
