@@ -12,6 +12,11 @@ node:
   registrarImage: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.10.1
   logLevel: 2
 
+# Metrics configuration
+metrics:
+  enabled: true
+  port: 9898
+
 resources: {}
 
 serviceAccount:

@@ -15,6 +15,12 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "my-csi-driver.fullname" . }}
         app.kubernetes.io/component: node
+      {{- if .Values.metrics.enabled }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.metrics.port }}"
+        prometheus.io/path: "/metrics"
+      {{- end }}
     spec:
       serviceAccountName: {{ include "my-csi-driver.fullname" . }}-node
       containers:
@@ -26,6 +32,9 @@ spec:
             - "--nodeid=$(NODE_NAME)"
             - "--drivername={{ include "my-csi-driver.fullname" . }}"
             - "--mode=node"
+            {{- if .Values.metrics.enabled }}
+            - "--metrics-port={{ .Values.metrics.port }}"
+            {{- end }}
           securityContext:
             privileged: true
           env:
@@ -35,6 +44,12 @@ spec:
                   fieldPath: spec.nodeName
             - name: CSI_BACKING_DIR
               value: {{ .Values.backingDir | quote }}
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+          {{- end }}
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/kubelet/plugins/{{ include "my-csi-driver.fullname" . }}
