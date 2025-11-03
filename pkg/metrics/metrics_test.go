@@ -193,6 +193,8 @@ func TestGetAllVolumeStats_NonExistentDirectory(t *testing.T) {
 }
 
 // Helper function to create a test file with a specific size
+// Note: This creates a sparse file (no actual data written) for testing file size,
+// which is different from createTestFileWithData in server_test.go that writes actual data.
 func createTestFile(path string, size int64) error {
 	f, err := os.Create(path)
 	if err != nil {

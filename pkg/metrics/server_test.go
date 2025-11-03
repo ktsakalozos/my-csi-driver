@@ -107,6 +107,8 @@ func TestMetricsServerStop(t *testing.T) {
 }
 
 // Helper function to create a test file with actual data (not sparse)
+// This ensures blocks are actually allocated on disk for accurate used space metrics.
+// Unlike createTestFile in metrics_test.go which creates sparse files for testing size.
 func createTestFileWithData(path string, size int64) error {
 	f, err := os.Create(path)
 	if err != nil {
