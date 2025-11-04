@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -179,7 +180,17 @@ READY:
 		t.Errorf("Expected to find metric: %s", expectedVolumeUsed)
 	}
 
-	// Test 7: Delete the volume and verify metrics update
+	// Test 7: Verify the volume_total metric reports the correct size (10 MB = 10485760 bytes)
+	volumeTotalValue, err := parseMetricValue(metricsAfterCreate, expectedVolumeTotal)
+	if err != nil {
+		t.Errorf("Failed to parse volume_total metric: %v", err)
+	} else if volumeTotalValue != 10485760 {
+		t.Errorf("Expected volume_total to be 10485760 bytes (10 MB), got %f", volumeTotalValue)
+	} else {
+		t.Logf("✓ Volume total metric correctly reports %f bytes (10 MB)", volumeTotalValue)
+	}
+
+	// Test 8: Delete the volume and verify metrics update
 	cmdDel := exec.Command("csc", "controller", "delete-volume", "--endpoint", endpoint, volID)
 	delOut, err := cmdDel.CombinedOutput()
 	if err != nil {
@@ -203,7 +214,7 @@ READY:
 
 	metricsAfterDelete := string(body3)
 
-	// Test 8: Verify volume metrics are gone after deletion
+	// Test 9: Verify volume metrics are gone after deletion
 	if strings.Contains(metricsAfterDelete, volID) {
 		t.Errorf("Expected metrics to NOT contain volume ID '%s' after deletion, but it was still present", volID)
 	}
@@ -297,5 +308,32 @@ func TestCSI_MetricsBasic(t *testing.T) {
 		}
 	}
 
+	// Verify the volume_total metric reports the correct size (1 MB = 1048576 bytes)
+	expectedVolumeTotal := fmt.Sprintf("rawfile_volume_total{node=\"basic-test-node\",volume=\"%s\"}", testVolID)
+	volumeTotalValue, err := parseMetricValue(metrics, expectedVolumeTotal)
+	if err != nil {
+		t.Errorf("Failed to parse volume_total metric: %v", err)
+	} else if volumeTotalValue != 1048576 {
+		t.Errorf("Expected volume_total to be 1048576 bytes (1 MB), got %f", volumeTotalValue)
+	} else {
+		t.Logf("✓ Volume total metric correctly reports %f bytes (1 MB)", volumeTotalValue)
+	}
+
 	t.Logf("✓ All basic metrics checks passed")
+}
+
+// parseMetricValue extracts the numeric value from a Prometheus metric line
+// Example input: rawfile_volume_total{node="test",volume="vol-123"} 1048576
+// Returns: 1048576
+func parseMetricValue(metrics, metricLine string) (float64, error) {
+	lines := strings.Split(metrics, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, metricLine) {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				return strconv.ParseFloat(parts[1], 64)
+			}
+		}
+	}
+	return 0, fmt.Errorf("metric line not found: %s", metricLine)
 }
