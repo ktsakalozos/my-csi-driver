@@ -89,7 +89,7 @@ func TestMetricsServerIntegration(t *testing.T) {
 func TestMetricsServerStop(t *testing.T) {
 	// Test that the server can be started and stopped cleanly
 	server := NewServer(19899)
-	
+
 	if err := server.Start(); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
@@ -137,7 +137,7 @@ func createTestFileWithData(path string, size int64) error {
 func ExampleNewServer() {
 	// Create a metrics server on port 9898
 	server := NewServer(9898)
-	
+
 	// Create and register a volume stats collector
 	collector := NewVolumeStatsCollector("my-node", "/var/lib/my-csi-driver")
 	if err := server.RegisterCollector(collector); err != nil {
