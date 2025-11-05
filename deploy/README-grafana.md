@@ -89,30 +89,57 @@ Ensure that:
 2. Prometheus is configured to scrape the CSI driver metrics endpoint
 3. The Helm chart has been deployed with `metrics.enabled=true` (default)
 
-### Prometheus ServiceMonitor Example
+### Prometheus PodMonitor (Recommended)
 
-If using Prometheus Operator:
+Since the CSI driver is deployed as a DaemonSet (not a Deployment with Service), use a **PodMonitor** to scrape metrics directly from the pods.
+
+If using Prometheus Operator, you can apply the provided PodMonitor manifest:
+
+```bash
+kubectl apply -f deploy/podmonitor.yaml
+```
+
+Or create a PodMonitor manually:
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
+kind: PodMonitor
 metadata:
   name: my-csi-driver-metrics
-  namespace: kube-system
+  namespace: default  # Adjust to your deployment namespace
+  labels:
+    app: my-csi-driver
 spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: my-csi-driver
       app.kubernetes.io/component: node
-  endpoints:
-  - port: metrics
-    interval: 30s
-    path: /metrics
+  podMetricsEndpoints:
+    - honorLabels: true
+      interval: 15s
+      path: /metrics
+      targetPort: 9898
+      scheme: http
+```
+
+**Important**: Ensure your Prometheus object is configured to discover PodMonitors:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: prometheus
+spec:
+  # ... other configuration ...
+  podMonitorNamespaceSelector: {}  # Select PodMonitors from all namespaces
+  podMonitorSelector:
+    matchLabels:
+      app: my-csi-driver
 ```
 
 ### Manual Prometheus Configuration
 
-Add to your `prometheus.yml`:
+If not using Prometheus Operator, add to your `prometheus.yml`:
 
 ```yaml
 scrape_configs:
@@ -121,20 +148,26 @@ scrape_configs:
       - role: pod
         namespaces:
           names:
-            - kube-system
+            - default  # Adjust to your deployment namespace
     relabel_configs:
+      # Only scrape pods with prometheus.io/scrape annotation
       - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
         action: keep
         regex: true
+      # Use the prometheus.io/path annotation for metrics path
       - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
         action: replace
         target_label: __metrics_path__
         regex: (.+)
+      # Use the prometheus.io/port annotation for metrics port
       - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
         action: replace
         regex: ([^:]+)(?::\d+)?;(\d+)
         replacement: $1:$2
         target_label: __address__
+      # Add pod labels to metrics
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
 ```
 
 ## Customization
