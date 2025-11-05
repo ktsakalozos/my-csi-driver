@@ -141,8 +141,9 @@ func (c *VolumeStatsCollector) getAllVolumeStats() (map[string]VolumeStats, erro
 			return nil
 		}
 
-		// Used space is blocks * block size
-		usedBytes := stat.Blocks * 512 // stat.Blocks is in 512-byte units
+		// Used space is blocks * block size. Note: On most Unix-like systems, stat.Blocks is in 512-byte units,
+		// but on some platforms, the block size may differ. For portability, we use stat.Blksize.
+		usedBytes := stat.Blocks * uint64(stat.Blksize)
 
 		stats[volumeID] = VolumeStats{
 			Used:  int64(usedBytes),
