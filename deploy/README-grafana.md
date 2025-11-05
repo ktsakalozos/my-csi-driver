@@ -185,7 +185,7 @@ You can customize the dashboard by:
 
 1. Verify metrics are being exposed:
    ```bash
-   kubectl port-forward -n kube-system daemonset/my-csi-driver 9898:9898
+   kubectl port-forward -n default daemonset/my-csi-driver 9898:9898  # Use your deployment namespace if different
    curl http://localhost:9898/metrics
    ```
 
