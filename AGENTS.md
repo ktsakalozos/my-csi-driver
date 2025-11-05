@@ -8,13 +8,15 @@ This document is a quick, task-focused guide for an automated contributor (or hu
 - Language/Tooling: Go (module), Docker, Helm, Kubernetes
 - Go: 1.24.x (module path `github.com/ktsakalozos/my-csi-driver`)
 - Entrypoint: `cmd/driver/main.go`
-- Driver flags: `--endpoint`, `--nodeid`, `--drivername`, `--working-mount-dir`, `--mode` (controller|node|both)
+- Driver flags: `--endpoint`, `--nodeid`, `--drivername`, `--working-mount-dir`, `--mode` (controller|node|both), `--metrics-port` (default: 9898)
 - Env fallbacks: `NODE_NAME` (for nodeid), `CSI_BACKING_DIR` (overrides backing dir)
 - Default backing dir: `/var/lib/my-csi-driver`
+- Metrics: Prometheus metrics exposed at `/metrics` on port 9898 (configurable)
 - Helm chart: `charts/my-csi-driver`
   - Controller: Deployment + external-provisioner
   - Node: DaemonSet + node-driver-registrar (privileged, mounts /dev)
   - CSIDriver + RBAC + optional StorageClass (default-enabled)
+  - Metrics: Enabled by default, configurable via `metrics.enabled` and `metrics.port`
 - CI e2e: `.github/workflows/e2e-kind.yaml`
   - Triggers: push (main), pull_request (main)
   - Image push to GHCR only on push events (`if: github.event_name == 'push'`).
@@ -50,6 +52,49 @@ Notes
 Requirements for integration tests
 - Root privileges and tools (losetup, mkfs.ext4, mount/umount) on the host.
 - The test will create/truncate backing files; ensure there is space under the backing dir.
+
+### Test metrics endpoint
+
+- Verify metrics are exposed locally
+  ```bash
+  # Port-forward to a running driver pod
+  kubectl port-forward -n default daemonset/my-csi-driver 9898:9898
+  curl http://localhost:9898/metrics
+  ```
+- Expected metrics:
+  - `rawfile_remaining_capacity{node}` - Available capacity on each node (bytes)
+  - `rawfile_volume_used{node,volume}` - Actual disk usage per volume (bytes)
+  - `rawfile_volume_total{node,volume}` - Allocated space per volume (bytes)
+
+### Deploy Prometheus monitoring
+
+- Using Prometheus Operator (recommended for DaemonSet):
+  ```bash
+  kubectl apply -f deploy/podmonitor.yaml
+  ```
+- Ensure Prometheus object has correct selectors:
+  ```yaml
+  podMonitorNamespaceSelector: {}
+  podMonitorSelector:
+    matchLabels:
+      app: my-csi-driver
+  ```
+
+### Deploy Grafana dashboard
+
+- Import dashboard via Grafana UI:
+  1. Navigate to Dashboards → Import
+  2. Upload `deploy/grafana-dashboard.json`
+  3. Select your Prometheus datasource
+- Or deploy as ConfigMap for auto-discovery:
+  ```bash
+  kubectl create configmap my-csi-driver-dashboard \
+    --from-file=deploy/grafana-dashboard.json \
+    --namespace=monitoring
+  kubectl label configmap my-csi-driver-dashboard \
+    grafana_dashboard=1 \
+    --namespace=monitoring
+  ```
 
 ### Reproduce CI e2e locally with Kind (outline)
 
@@ -146,6 +191,11 @@ kind delete cluster --name csi-e2e || true
 - Unit tests should avoid privileged operations; integration tests may require them.
 - Logging uses `k8s.io/klog/v2`; default is to log to stderr (set in `main.go`).
 - Respect the flags and environment precedence for `nodeid` and `CSI_BACKING_DIR`.
+- Metrics implementation:
+  - Metrics package: `pkg/metrics/`
+  - Collector uses Prometheus client-go
+  - Server starts on driver initialization (port configurable via `--metrics-port`)
+  - Metrics update automatically based on volume file scanning
 
 ## Helm and runtime notes
 
@@ -153,6 +203,11 @@ kind delete cluster --name csi-e2e || true
 - Controller mounts the same host backing directory to manage sparse files shared with nodes.
 - CSIDriver sets `attachRequired=false`, `storageCapacity=true`, `fsGroupPolicy=File`.
 - Default StorageClass is named `my-csi-driver-default` (configurable via values).
+- Metrics endpoint:
+  - Exposed on port 9898 (configurable via `metrics.port` in values.yaml)
+  - DaemonSet pods have Prometheus scrape annotations
+  - Use PodMonitor (not ServiceMonitor) for Prometheus Operator since deployment is a DaemonSet
+  - Grafana dashboard available in `deploy/grafana-dashboard.json`
 
 ## Safety checks for agents
 
@@ -169,6 +224,8 @@ kind delete cluster --name csi-e2e || true
 - [ ] Helm chart values and templates updated if flags/args change
 - [ ] CI e2e passes on PR
 - [ ] Docs updated (README and/or this guide) if behavior changed
+- [ ] Metrics tests pass if metrics code changed (`go test ./pkg/metrics/...`)
+- [ ] Grafana dashboard updated if new metrics added (`deploy/grafana-dashboard.json`)
 
 ## Troubleshooting quick picks
 
@@ -176,3 +233,12 @@ kind delete cluster --name csi-e2e || true
 - Node errors about `driverNodeID must not be empty`: verify `NODE_NAME` wiring or set `--nodeid` explicitly.
 - Loop device failures: ensure privileged pod and host `/dev` mount; check image contains `losetup` and filesystem tools.
 - Controller RBAC issues: verify ClusterRole rules for PV/PVC/SC/leases/pods/nodes align with templates.
+- Metrics not available:
+  - Verify driver started with `--metrics-port` (default 9898)
+  - Check pod has port exposed: `kubectl get pod <pod-name> -o yaml | grep -A 5 ports`
+  - For Prometheus: use PodMonitor (not ServiceMonitor) since deployment is a DaemonSet
+  - Verify PodMonitor selectors match pod labels (`app.kubernetes.io/name: my-csi-driver`)
+- Grafana dashboard shows no data:
+  - Verify Prometheus datasource is configured correctly
+  - Check Prometheus is scraping metrics (Status → Targets in Prometheus UI)
+  - Ensure time range in dashboard covers recent data
