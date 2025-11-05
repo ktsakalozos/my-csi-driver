@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: my-csi-driver-metrics
+  namespace: default
+  labels:
+    app: my-csi-driver
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: my-csi-driver
+      app.kubernetes.io/component: node
+  podMetricsEndpoints:
+    - honorLabels: true
+      interval: 15s
+      path: /metrics
+      targetPort: 9898
+      scheme: http

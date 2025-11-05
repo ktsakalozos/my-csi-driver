@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 
+	"github.com/ktsakalozos/my-csi-driver/pkg/metrics"
 	"github.com/ktsakalozos/my-csi-driver/pkg/rawfile"
 	klog "k8s.io/klog/v2"
 )
@@ -14,6 +15,7 @@ var (
 	driverName      = flag.String("drivername", "my-csi-driver", "name of the driver")
 	workingMountDir = flag.String("working-mount-dir", "/var/lib/my-csi-driver", "directory for image files backing the volumes")
 	mode            = flag.String("mode", "both", "driver mode: controller | node | both")
+	metricsPort     = flag.Int("metrics-port", 9898, "port for prometheus metrics endpoint")
 )
 
 func main() {
@@ -45,6 +47,19 @@ func handle() {
 			backingDir = *workingMountDir
 		} else {
 			backingDir = "/var/lib/my-csi-driver"
+		}
+	}
+
+	// Start metrics server
+	if *metricsPort > 0 {
+		metricsServer := metrics.NewServer(*metricsPort)
+		collector := metrics.NewVolumeStatsCollector(*nodeID, backingDir)
+		if err := metricsServer.RegisterCollector(collector); err != nil {
+			klog.Warningf("Failed to register metrics collector: %v", err)
+		} else {
+			if err := metricsServer.Start(); err != nil {
+				klog.Warningf("Failed to start metrics server: %v", err)
+			}
 		}
 	}
 
