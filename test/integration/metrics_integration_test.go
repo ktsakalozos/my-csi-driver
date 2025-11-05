@@ -237,7 +237,9 @@ func TestCSI_MetricsBasic(t *testing.T) {
 	bin := buildBinary(t, root)
 
 	sockDir := filepath.Join(os.TempDir(), "csi-test-metrics-basic")
-	_ = os.MkdirAll(sockDir, 0o755)
+	if err := os.MkdirAll(sockDir, 0o755); err != nil {
+		t.Fatalf("failed to create socket directory %s: %v", sockDir, err)
+	}
 	sock := filepath.Join(sockDir, "csi.sock")
 	endpoint := fmt.Sprintf("unix://%s", sock)
 
