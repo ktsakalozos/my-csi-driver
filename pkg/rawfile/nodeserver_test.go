@@ -70,9 +70,11 @@ func TestNode_GetVolumeStats(t *testing.T) {
 
 	// Test 2: Non-existent path should return error
 	t.Run("NonExistentPath", func(t *testing.T) {
+		// Use a path that doesn't exist within a temp directory
+		nonExistentPath := t.TempDir() + "/nonexistent-subdir"
 		req := &csi.NodeGetVolumeStatsRequest{
 			VolumeId:   "test-vol",
-			VolumePath: "/tmp/my-csi-driver/nonexistent-path-12345",
+			VolumePath: nonExistentPath,
 		}
 		_, err := ns.NodeGetVolumeStats(context.Background(), req)
 		if err == nil {
@@ -82,12 +84,8 @@ func TestNode_GetVolumeStats(t *testing.T) {
 
 	// Test 3: Valid path should return stats
 	t.Run("ValidPath", func(t *testing.T) {
-		// Create a temporary directory for testing
-		testPath := "/tmp/my-csi-driver/test-stats-path"
-		if err := os.MkdirAll(testPath, 0750); err != nil {
-			t.Fatalf("failed to create test path: %v", err)
-		}
-		defer os.RemoveAll(testPath)
+		// Use t.TempDir() for automatic cleanup and test isolation
+		testPath := t.TempDir()
 
 		req := &csi.NodeGetVolumeStatsRequest{
 			VolumeId:   "test-vol",
