@@ -3,6 +3,7 @@ package rawfile
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -71,7 +72,7 @@ func TestNode_GetVolumeStats(t *testing.T) {
 	// Test 2: Non-existent path should return error
 	t.Run("NonExistentPath", func(t *testing.T) {
 		// Use a path that doesn't exist within a temp directory
-		nonExistentPath := t.TempDir() + "/nonexistent-subdir"
+		nonExistentPath := filepath.Join(t.TempDir(), "nonexistent-subdir")
 		req := &csi.NodeGetVolumeStatsRequest{
 			VolumeId:   "test-vol",
 			VolumePath: nonExistentPath,

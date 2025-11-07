@@ -172,6 +172,9 @@ func (ns *NodeServer) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 
 	// Calculate total capacity and available bytes
 	// Blocks * BlockSize gives us the total/available in bytes
+	// Note: While this multiplication could theoretically overflow for extremely large filesystems,
+	// int64 can represent up to ~8 exabytes which exceeds current practical filesystem sizes.
+	// This matches the CSI spec which defines these fields as int64.
 	total := int64(stats.Blocks) * int64(stats.Bsize)
 	available := int64(stats.Bavail) * int64(stats.Bsize)
 
