@@ -69,7 +69,7 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		if snapshot != nil {
 			snapshotID := snapshot.GetSnapshotId()
 			klog.Infof("CreateVolume from snapshot: %s", snapshotID)
-			
+
 			snapshotFile := cs.backingDir + "/" + snapshotID + ".snap"
 			if _, err := os.Stat(snapshotFile); err != nil {
 				if os.IsNotExist(err) {
@@ -286,7 +286,7 @@ func (cs *ControllerServer) ListSnapshots(ctx context.Context, req *csi.ListSnap
 	if req.GetSnapshotId() != "" {
 		snapshotID := req.GetSnapshotId()
 		snapshotFile := cs.backingDir + "/" + snapshotID + ".snap"
-		
+
 		fi, err := os.Stat(snapshotFile)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -326,7 +326,7 @@ func (cs *ControllerServer) ListSnapshots(ctx context.Context, req *csi.ListSnap
 		if entry.IsDir() {
 			continue
 		}
-		
+
 		// Only list .snap files
 		name := entry.Name()
 		if len(name) < 5 || name[len(name)-5:] != ".snap" {

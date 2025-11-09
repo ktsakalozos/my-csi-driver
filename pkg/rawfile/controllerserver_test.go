@@ -359,7 +359,7 @@ func TestController_CreateVolumeFromSnapshot(t *testing.T) {
 	snapshotID := "snap-test-restore"
 	snapshotFile := backingDir + "/" + snapshotID + ".snap"
 	testData := []byte("snapshot data for restore")
-	
+
 	f, err := os.Create(snapshotFile)
 	if err != nil {
 		t.Fatalf("failed to create snapshot file: %v", err)

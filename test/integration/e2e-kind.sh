@@ -235,5 +235,155 @@ echo "Pod completed successfully"
 
 echo ""
 echo "========================================="
+echo "Step 12: Install VolumeSnapshot CRDs (if not present)"
+echo "========================================="
+# Check if VolumeSnapshot CRD exists, install if not
+if ! kubectl get crd volumesnapshots.snapshot.storage.k8s.io > /dev/null 2>&1; then
+  echo "Installing VolumeSnapshot CRDs..."
+  kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.0.1/client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
+  kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.0.1/client/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml
+  kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/v8.0.1/client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
+else
+  echo "VolumeSnapshot CRDs already installed"
+fi
+
+echo ""
+echo "========================================="
+echo "Step 13: Create VolumeSnapshotClass"
+echo "========================================="
+cat <<'YAML' > /tmp/volumesnapshotclass.yaml
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: my-csi-driver-snapclass
+driver: my-csi-driver
+deletionPolicy: Delete
+YAML
+kubectl apply -f /tmp/volumesnapshotclass.yaml
+
+echo ""
+echo "========================================="
+echo "Step 14: Create a VolumeSnapshot of demo-pvc"
+echo "========================================="
+cat <<'YAML' > /tmp/volumesnapshot.yaml
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: demo-snapshot
+spec:
+  volumeSnapshotClassName: my-csi-driver-snapclass
+  source:
+    persistentVolumeClaimName: demo-pvc
+YAML
+kubectl apply -f /tmp/volumesnapshot.yaml
+
+echo ""
+echo "========================================="
+echo "Step 15: Wait for VolumeSnapshot to be ready"
+echo "========================================="
+for i in {1..30}; do
+  if kubectl get volumesnapshot demo-snapshot -o jsonpath='{.status.readyToUse}' 2>/dev/null | grep -q true; then
+    echo "VolumeSnapshot is ready"
+    break
+  fi
+  echo "Waiting for VolumeSnapshot to be ready (attempt $i/30)..."
+  sleep 2
+done
+
+# Verify snapshot is ready
+if ! kubectl get volumesnapshot demo-snapshot -o jsonpath='{.status.readyToUse}' 2>/dev/null | grep -q true; then
+  echo "VolumeSnapshot did not become ready in time"
+  kubectl describe volumesnapshot demo-snapshot || true
+  kubectl get volumesnapshotcontent || true
+  exit 1
+fi
+kubectl get volumesnapshot demo-snapshot -o yaml
+
+echo ""
+echo "========================================="
+echo "Step 16: Create a new PVC from the snapshot"
+echo "========================================="
+cat <<'YAML' > /tmp/pvc-from-snapshot.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: restored-pvc
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  storageClassName: my-csi-driver-default
+  dataSource:
+    name: demo-snapshot
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+  resources:
+    requests:
+      storage: 1Mi
+YAML
+kubectl apply -f /tmp/pvc-from-snapshot.yaml
+
+echo ""
+echo "========================================="
+echo "Step 17: Wait for restored PVC to be bound"
+echo "========================================="
+kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/restored-pvc --timeout=320s
+
+echo ""
+echo "========================================="
+echo "Step 18: Verify restored data by mounting in a pod"
+echo "========================================="
+cat <<'YAML' > /tmp/restore-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: restore-app
+spec:
+  restartPolicy: Never
+  containers:
+  - name: app
+    image: alpine:3.19
+    command: ["/bin/sh","-c","cat /data/hello && sleep 2"]
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: restored-pvc
+YAML
+kubectl apply -f /tmp/restore-pod.yaml
+
+echo ""
+echo "========================================="
+echo "Step 19: Wait for restore pod completion"
+echo "========================================="
+if ! kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/restore-app --timeout=300s; then
+  echo "Restore pod did not complete successfully; dumping diagnostics..."
+  kubectl get pod restore-app -o yaml || true
+  kubectl describe pod restore-app || true
+  kubectl logs pod/restore-app || true
+  exit 1
+fi
+echo "Restore pod completed successfully"
+
+# Verify the restored data matches original
+echo "Verifying restored data..."
+RESTORED_DATA=$(kubectl logs restore-app 2>/dev/null || echo "")
+if [ "$RESTORED_DATA" != "hello" ]; then
+  echo "ERROR: Restored data mismatch. Expected 'hello', got '$RESTORED_DATA'"
+  exit 1
+fi
+echo "Restored data verified: $RESTORED_DATA"
+
+echo ""
+echo "========================================="
+echo "Step 20: Cleanup snapshot test resources"
+echo "========================================="
+kubectl delete pod restore-app --ignore-not-found=true || true
+kubectl delete pvc restored-pvc --ignore-not-found=true || true
+kubectl delete volumesnapshot demo-snapshot --ignore-not-found=true || true
+kubectl delete volumesnapshotclass my-csi-driver-snapclass --ignore-not-found=true || true
+
+echo ""
+echo "========================================="
 echo "E2E Tests PASSED!"
 echo "========================================="
