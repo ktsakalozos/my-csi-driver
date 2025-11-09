@@ -24,7 +24,7 @@ endif
 GO_BUILD_FLAGS ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: all build push run clean fmt vet test help integration-test
+.PHONY: all build push run clean fmt vet test help integration-test e2e-tests
 
 all: build
 
@@ -38,6 +38,7 @@ help:
 	@echo "  make all   IMG=ghcr.io/<user>/my-csi-driver:tag"
 	@echo "  make run   IMG=my-csi-driver:dev CSI_ENDPOINT=unix:///csi/csi.sock CSI_BACKING_DIR=/data"
 	@echo "  make integration-test   # run integration tests (requires 'csc' in PATH)"
+	@echo "  make e2e-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>   # run e2e tests in kind cluster"
 	@echo
 	@echo "Variables (overridable):"
 	@echo "  REGISTRY           Optional registry prefix (e.g., ghcr.io/<user>)"
@@ -58,6 +59,7 @@ help:
 	@echo "  vet                 Run 'go vet ./...'"
 	@echo "  test                Run 'go test ./... -v'"
 	@echo "  integration-test    Run 'go test -tags=integration ./test/integration -v' (requires 'csc')"
+	@echo "  e2e-tests           Run end-to-end tests in kind cluster (requires kind, kubectl, helm)"
 	@echo "  clean               No-op; use 'docker system prune -f' if needed"
 	@echo
 	@echo "Current IMG: $(IMG)"
@@ -106,6 +108,29 @@ test:
 integration-test:
 	go clean -testcache
 	go test -tags=integration ./test/integration -v
+
+# Run end-to-end tests in a kind cluster
+# This target requires:
+#   - kind (Kubernetes in Docker)
+#   - kubectl
+#   - helm
+#   - Docker image already built (make build IMG=...)
+# Environment variables:
+#   IMG                  - Docker image to test (required)
+#   REGISTRY             - Registry prefix for the image (required)
+#   KIND_CLUSTER_NAME    - Name of the kind cluster (default: csi-e2e)
+#   SKIP_CLEANUP         - Set to 'true' to skip cleanup on success (default: false)
+#
+# Usage:
+#   make e2e-tests IMG=ghcr.io/user/my-csi-driver:tag REGISTRY=ghcr.io/user
+e2e-tests:
+	@if [ -z "$(IMG)" ]; then echo "IMG is required (e.g. make e2e-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>)"; exit 1; fi
+	@if [ -z "$(REGISTRY)" ]; then echo "REGISTRY is required (e.g. make e2e-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>)"; exit 1; fi
+	@if ! command -v kind &> /dev/null; then echo "kind is required but not found in PATH"; exit 1; fi
+	@if ! command -v kubectl &> /dev/null; then echo "kubectl is required but not found in PATH"; exit 1; fi
+	@if ! command -v helm &> /dev/null; then echo "helm is required but not found in PATH"; exit 1; fi
+	@echo "Running e2e tests with IMG=$(IMG), REGISTRY=$(REGISTRY)"
+	IMG=$(IMG) REGISTRY=$(REGISTRY) KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) SKIP_CLEANUP=$(SKIP_CLEANUP) ./test/integration/e2e-kind.sh
 
 clean:
 	@echo "Nothing to clean for container image; docker system prune -f if needed."
