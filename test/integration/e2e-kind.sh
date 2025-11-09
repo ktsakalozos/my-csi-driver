@@ -34,8 +34,8 @@ if [ -z "${REGISTRY:-}" ]; then
 fi
 
 # Extract image tag from IMG
-IMAGE_TAG=$(echo "$IMG" | awk -F':' '{print $2}')
-if [ -z "$IMAGE_TAG" ]; then
+IMAGE_TAG="${IMG##*:}"
+if [ -z "$IMAGE_TAG" ] || [ "$IMAGE_TAG" = "$IMG" ]; then
   echo "Error: Unable to extract tag from IMG=$IMG"
   exit 1
 fi
@@ -142,7 +142,6 @@ echo ""
 echo "========================================="
 echo "Step 6: Verify controller and node modes"
 echo "========================================="
-set -x
 echo "Checking controller pod args include --mode=controller"
 CTRL_POD=$(kubectl get pods -l app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.name}')
 kubectl get pod "$CTRL_POD" -o jsonpath='{.spec.containers[0].args}' | grep -- '--mode=controller'
@@ -150,7 +149,6 @@ echo "Checking node daemonset pod args include --mode=node"
 NODE_POD=$(kubectl get pods -l app.kubernetes.io/component=node -o jsonpath='{.items[0].metadata.name}')
 kubectl get pod "$NODE_POD" -o jsonpath='{.spec.containers[0].args}' | grep -- '--mode=node'
 echo "Controller and node mode arguments verified."
-set +x
 
 echo ""
 echo "========================================="
