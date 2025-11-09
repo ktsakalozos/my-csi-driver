@@ -34,7 +34,7 @@ if [ -z "${REGISTRY:-}" ]; then
 fi
 
 # Extract image tag from IMG
-IMAGE_TAG="${IMG##*:}"
+IMAGE_TAG=$(echo "$IMG" | awk -F':' '{print $NF}')
 if [ -z "$IMAGE_TAG" ] || [ "$IMAGE_TAG" = "$IMG" ]; then
   echo "Error: Unable to extract tag from IMG=$IMG"
   exit 1
