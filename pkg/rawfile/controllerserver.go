@@ -17,6 +17,7 @@ type ControllerServer struct {
 	name       string
 	version    string
 	backingDir string
+	nodeID     string
 	csi.UnimplementedControllerServer
 }
 
@@ -30,7 +31,7 @@ func NewControllerServer(name, version string) *ControllerServer {
 	if dir == "" {
 		dir = "/var/lib/my-csi-driver"
 	}
-	return &ControllerServer{name: name, version: version, backingDir: dir}
+	return &ControllerServer{name: name, version: version, backingDir: dir, nodeID: ""}
 }
 
 // NewControllerServerWithBackingDir creates a controller with an explicit backingDir.
@@ -43,7 +44,20 @@ func NewControllerServerWithBackingDir(name, version, backingDir string) *Contro
 			dir = "/var/lib/my-csi-driver"
 		}
 	}
-	return &ControllerServer{name: name, version: version, backingDir: dir}
+	return &ControllerServer{name: name, version: version, backingDir: dir, nodeID: ""}
+}
+
+// NewControllerServerWithNodeID creates a controller with explicit backingDir and nodeID for topology awareness.
+func NewControllerServerWithNodeID(name, version, backingDir, nodeID string) *ControllerServer {
+	dir := backingDir
+	if dir == "" {
+		// Fall back to env, then default
+		dir = os.Getenv("CSI_BACKING_DIR")
+		if dir == "" {
+			dir = "/var/lib/my-csi-driver"
+		}
+	}
+	return &ControllerServer{name: name, version: version, backingDir: dir, nodeID: nodeID}
 }
 
 func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
@@ -74,7 +88,7 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	}
 
 	// Return volume context with file path
-	return &csi.CreateVolumeResponse{
+	resp := &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      volID,
 			CapacityBytes: size,
@@ -82,7 +96,20 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 				"backingFile": backingFile,
 			},
 		},
-	}, nil
+	}
+
+	// Add topology information if nodeID is set
+	if cs.nodeID != "" {
+		resp.Volume.AccessibleTopology = []*csi.Topology{
+			{
+				Segments: map[string]string{
+					"topology.kubernetes.io/hostname": cs.nodeID,
+				},
+			},
+		}
+	}
+
+	return resp, nil
 }
 
 func (cs *ControllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {

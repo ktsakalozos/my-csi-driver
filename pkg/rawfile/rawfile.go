@@ -53,7 +53,7 @@ func (d *Driver) Run(testMode bool) {
 	var csServer csi.ControllerServer
 	var nsServer csi.NodeServer
 	if d.mode == "controller" || d.mode == "both" {
-		csServer = NewControllerServerWithBackingDir(d.name, d.version, d.backingDir)
+		csServer = NewControllerServerWithNodeID(d.name, d.version, d.backingDir, d.nodeID)
 	}
 	if d.mode == "node" || d.mode == "both" {
 		nsServer = NewNodeServer(d.nodeID)

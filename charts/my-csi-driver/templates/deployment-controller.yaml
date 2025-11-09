@@ -27,6 +27,10 @@ spec:
             - "--drivername={{ include "my-csi-driver.fullname" . }}"
             - "--mode=controller"
           env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             - name: CSI_BACKING_DIR
               value: {{ .Values.backingDir | quote }}
           volumeMounts:
