@@ -59,6 +59,22 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+        - name: csi-snapshotter
+          image: {{ .Values.controller.snapshotterImage }}
+          args:
+            - --csi-address=/csi/csi.sock
+            - --leader-election=true
+            - --leader-election-namespace=$(NAMESPACE)
+            - --v=2
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
       volumes:
         - name: socket-dir
           emptyDir: {}
