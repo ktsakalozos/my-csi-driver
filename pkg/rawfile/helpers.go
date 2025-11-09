@@ -2,7 +2,9 @@ package rawfile
 
 import (
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"os/exec"
 )
 
@@ -80,4 +82,26 @@ func execCommand(name string, args ...string) ([]byte, error) {
 	log.Printf("execCommand: %s %v", name, args)
 	cmd := exec.Command(name, args...)
 	return cmd.CombinedOutput()
+}
+
+// Helper: copy file from src to dst
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open source file: %v", err)
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("failed to create destination file: %v", err)
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	if err != nil {
+		return fmt.Errorf("failed to copy file: %v", err)
+	}
+
+	return destFile.Sync()
 }
