@@ -1,5 +1,6 @@
 # Go build
 bin/
+driver
 *.exe
 *.dll
 *.so

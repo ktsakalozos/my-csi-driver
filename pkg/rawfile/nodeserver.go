@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"golang.org/x/sys/unix"
 	klog "k8s.io/klog/v2"
 )
 
@@ -135,11 +136,59 @@ func (ns *NodeServer) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoReque
 }
 
 func (ns *NodeServer) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
-	return &csi.NodeGetCapabilitiesResponse{}, nil
+	caps := []*csi.NodeServiceCapability{
+		{
+			Type: &csi.NodeServiceCapability_Rpc{
+				Rpc: &csi.NodeServiceCapability_RPC{
+					Type: csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
+				},
+			},
+		},
+	}
+	return &csi.NodeGetCapabilitiesResponse{Capabilities: caps}, nil
 }
 
 func (ns *NodeServer) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
-	return &csi.NodeGetVolumeStatsResponse{}, nil
+	klog.Infof("NodeGetVolumeStats: %s", req.VolumeId)
+
+	// Validate volume path is provided
+	if req.VolumePath == "" {
+		return nil, fmt.Errorf("volume path is required")
+	}
+
+	// Check if volume path exists
+	if _, err := os.Stat(req.VolumePath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("volume path %s does not exist", req.VolumePath)
+		}
+		return nil, fmt.Errorf("failed to stat volume path %s: %v", req.VolumePath, err)
+	}
+
+	// Get filesystem statistics using statfs
+	var stats unix.Statfs_t
+	if err := unix.Statfs(req.VolumePath, &stats); err != nil {
+		return nil, fmt.Errorf("failed to get volume stats for %s: %v", req.VolumePath, err)
+	}
+
+	// Calculate total capacity and available bytes
+	// Blocks * BlockSize gives us the total/available in bytes
+	// Note: While this multiplication could theoretically overflow for extremely large filesystems,
+	// int64 can represent up to ~8 exabytes which exceeds current practical filesystem sizes.
+	// This matches the CSI spec which defines these fields as int64.
+	total := int64(stats.Blocks) * int64(stats.Bsize)
+	available := int64(stats.Bavail) * int64(stats.Bsize)
+
+	klog.Infof("NodeGetVolumeStats: volume=%s, total=%d bytes, available=%d bytes", req.VolumeId, total, available)
+
+	return &csi.NodeGetVolumeStatsResponse{
+		Usage: []*csi.VolumeUsage{
+			{
+				Unit:      csi.VolumeUsage_BYTES,
+				Total:     total,
+				Available: available,
+			},
+		},
+	}, nil
 }
 
 func (ns *NodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
