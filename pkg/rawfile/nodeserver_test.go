@@ -163,11 +163,11 @@ func TestNode_GetCapabilities(t *testing.T) {
 func TestNode_GarbageCollectVolumes(t *testing.T) {
 	// Create a temporary directory for this test
 	testDir := t.TempDir()
-	
+
 	// Create some backing files
 	activeVolFile := filepath.Join(testDir, "vol-active.img")
 	orphanedVolFile := filepath.Join(testDir, "vol-orphaned.img")
-	
+
 	// Create the files
 	for _, file := range []string{activeVolFile, orphanedVolFile} {
 		f, err := os.Create(file)
@@ -176,7 +176,7 @@ func TestNode_GarbageCollectVolumes(t *testing.T) {
 		}
 		f.Close()
 	}
-	
+
 	// Create a fake PV for the active volume
 	pv := &corev1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
@@ -194,10 +194,10 @@ func TestNode_GarbageCollectVolumes(t *testing.T) {
 			},
 		},
 	}
-	
+
 	clientset := fake.NewSimpleClientset(pv)
 	ns := NewNodeServer("test-node", testDir, clientset)
-	
+
 	// Verify both files exist before GC
 	if _, err := os.Stat(activeVolFile); err != nil {
 		t.Fatalf("Active volume file should exist before GC: %v", err)
@@ -205,15 +205,15 @@ func TestNode_GarbageCollectVolumes(t *testing.T) {
 	if _, err := os.Stat(orphanedVolFile); err != nil {
 		t.Fatalf("Orphaned volume file should exist before GC: %v", err)
 	}
-	
+
 	// Run garbage collection
 	ns.garbageCollectVolumes(context.Background())
-	
+
 	// Active volume should still exist
 	if _, err := os.Stat(activeVolFile); err != nil {
 		t.Errorf("Active volume file should still exist after GC: %v", err)
 	}
-	
+
 	// Orphaned volume should be deleted
 	if _, err := os.Stat(orphanedVolFile); !os.IsNotExist(err) {
 		t.Errorf("Orphaned volume file should be deleted after GC")
