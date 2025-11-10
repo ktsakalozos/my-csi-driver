@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"k8s.io/klog/v2"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog/v2"
 )
 
 // DriverOptions defines driver parameters specified in driver deployment

@@ -62,13 +62,13 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	if _, statErr := os.Stat(backingFile); statErr != nil {
 		if os.IsNotExist(statErr) {
 			klog.Infof("Backing file %s does not exist, creating just-in-time with size %d", backingFile, size)
-			
+
 			// Ensure backing directory exists
 			backingFileDir := filepath.Dir(backingFile)
 			if err := os.MkdirAll(backingFileDir, 0750); err != nil {
 				return nil, fmt.Errorf("failed to create backing directory: %v", err)
 			}
-			
+
 			// Create backing file
 			f, err := os.Create(backingFile)
 			if err != nil {

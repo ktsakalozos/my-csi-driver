@@ -99,7 +99,7 @@ func TestController_DeleteVolume(t *testing.T) {
 	if _, err := os.Stat(backingFile); err != nil {
 		t.Errorf("backing file should still exist after logical delete (will be cleaned by GC)")
 	}
-	
+
 	// Clean up the test file
 	os.Remove(backingFile)
 }
@@ -125,7 +125,7 @@ func TestController_GetVolume(t *testing.T) {
 			},
 		},
 	}
-	
+
 	clientset := fake.NewSimpleClientset(pv)
 	cs := NewControllerServerWithBackingDir("test-driver", "0.1.0", "/tmp/my-csi-driver", clientset)
 

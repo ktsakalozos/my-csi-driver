@@ -6,9 +6,9 @@ import (
 
 	"github.com/ktsakalozos/my-csi-driver/pkg/metrics"
 	"github.com/ktsakalozos/my-csi-driver/pkg/rawfile"
-	klog "k8s.io/klog/v2"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	klog "k8s.io/klog/v2"
 )
 
 var (
