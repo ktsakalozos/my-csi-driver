@@ -148,20 +148,30 @@ func (cs *ControllerServer) ControllerGetVolume(ctx context.Context, req *csi.Co
 		capacityBytes = capacity.Value()
 	}
 
-	// Extract backing file from volume attributes
+	// Extract backing file and size from volume attributes
 	backingFile := ""
+	size := ""
 	if pv.Spec.CSI.VolumeAttributes != nil {
 		backingFile = pv.Spec.CSI.VolumeAttributes["backingFile"]
+		size = pv.Spec.CSI.VolumeAttributes["size"]
 	}
 
 	// Return volume info from Kubernetes API
+	volumeContext := map[string]string{
+		"backingFile": backingFile,
+	}
+	// Include size if available from PV attributes, otherwise use capacity
+	if size != "" {
+		volumeContext["size"] = size
+	} else if capacityBytes > 0 {
+		volumeContext["size"] = strconv.FormatInt(capacityBytes, 10)
+	}
+
 	return &csi.ControllerGetVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      req.VolumeId,
 			CapacityBytes: capacityBytes,
-			VolumeContext: map[string]string{
-				"backingFile": backingFile,
-			},
+			VolumeContext: volumeContext,
 		},
 	}, nil
 }

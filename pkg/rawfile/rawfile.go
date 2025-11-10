@@ -63,7 +63,7 @@ func (d *Driver) Run(testMode bool) {
 		csServer = NewControllerServerWithBackingDir(d.name, d.version, d.backingDir, d.clientset)
 	}
 	if d.mode == "node" || d.mode == "both" {
-		nsServer = NewNodeServer(d.nodeID, d.backingDir, d.clientset)
+		nsServer = NewNodeServer(d.nodeID, d.name, d.backingDir, d.clientset)
 		// Start garbage collector in a goroutine
 		go nsServer.RunGarbageCollector(context.Background(), 5*time.Minute)
 	}

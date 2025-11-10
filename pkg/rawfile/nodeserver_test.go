@@ -16,7 +16,7 @@ func TestNode_PublishVolume(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 
 	// In the new architecture, NodeServer creates the backing file just-in-time
-	ns := NewNodeServer("test-node", "/tmp/my-csi-driver", clientset)
+	ns := NewNodeServer("test-node", "test-driver", "/tmp/my-csi-driver", clientset)
 
 	volID := "vol-test-publish"
 	backingFile := "/tmp/my-csi-driver/" + volID + ".img"
@@ -54,7 +54,7 @@ func TestNode_PublishVolume(t *testing.T) {
 
 func TestNode_UnpublishVolume(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	ns := NewNodeServer("test-node", "/tmp/my-csi-driver", clientset)
+	ns := NewNodeServer("test-node", "test-driver", "/tmp/my-csi-driver", clientset)
 	target := "/tmp/my-csi-driver/test-mount-unpub"
 	if err := os.MkdirAll(target, 0750); err != nil {
 		t.Fatalf("failed to create target dir: %v", err)
@@ -72,7 +72,7 @@ func TestNode_UnpublishVolume(t *testing.T) {
 
 func TestNode_GetVolumeStats(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	ns := NewNodeServer("test-node", "/tmp/my-csi-driver", clientset)
+	ns := NewNodeServer("test-node", "test-driver", "/tmp/my-csi-driver", clientset)
 
 	// Test 1: Missing volume path should return error
 	t.Run("MissingVolumePath", func(t *testing.T) {
@@ -141,7 +141,7 @@ func TestNode_GetVolumeStats(t *testing.T) {
 
 func TestNode_GetCapabilities(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	ns := NewNodeServer("test-node", "/tmp/my-csi-driver", clientset)
+	ns := NewNodeServer("test-node", "test-driver", "/tmp/my-csi-driver", clientset)
 	resp, err := ns.NodeGetCapabilities(context.Background(), &csi.NodeGetCapabilitiesRequest{})
 	if err != nil {
 		t.Fatalf("NodeGetCapabilities failed: %v", err)
@@ -196,7 +196,7 @@ func TestNode_GarbageCollectVolumes(t *testing.T) {
 	}
 
 	clientset := fake.NewSimpleClientset(pv)
-	ns := NewNodeServer("test-node", testDir, clientset)
+	ns := NewNodeServer("test-node", "test-driver", testDir, clientset)
 
 	// Verify both files exist before GC
 	if _, err := os.Stat(activeVolFile); err != nil {

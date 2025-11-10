@@ -21,14 +21,16 @@ var _ csi.NodeServer = (*NodeServer)(nil)
 // NodeServer implements the CSI Node service endpoints.
 type NodeServer struct {
 	nodeID     string
+	driverName string
 	backingDir string
 	clientset  kubernetes.Interface
 	csi.UnimplementedNodeServer
 }
 
-func NewNodeServer(nodeID, backingDir string, clientset kubernetes.Interface) *NodeServer {
+func NewNodeServer(nodeID, driverName, backingDir string, clientset kubernetes.Interface) *NodeServer {
 	return &NodeServer{
 		nodeID:     nodeID,
+		driverName: driverName,
 		backingDir: backingDir,
 		clientset:  clientset,
 	}
@@ -282,10 +284,11 @@ func (ns *NodeServer) garbageCollectVolumes(ctx context.Context) {
 		return
 	}
 
-	// Build a map of active volume handles for CSI volumes
+	// Build a map of active volume handles for CSI volumes belonging to this driver
 	activeVolumes := make(map[string]bool)
 	for _, pv := range pvList.Items {
-		if pv.Spec.CSI != nil && pv.Spec.CSI.VolumeHandle != "" {
+		// Only consider PVs managed by this driver
+		if pv.Spec.CSI != nil && pv.Spec.CSI.Driver == ns.driverName && pv.Spec.CSI.VolumeHandle != "" {
 			// Extract volume ID from backing file path if present
 			if backingFile, ok := pv.Spec.CSI.VolumeAttributes["backingFile"]; ok {
 				activeVolumes[backingFile] = true
