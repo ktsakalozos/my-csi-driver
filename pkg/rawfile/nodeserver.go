@@ -257,6 +257,12 @@ func (ns *NodeServer) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 func (ns *NodeServer) garbageCollectVolumes(ctx context.Context) {
 	klog.V(2).Infof("Starting garbage collection of orphaned volumes in %s", ns.backingDir)
 
+	// Check if clientset is available
+	if ns.clientset == nil {
+		klog.V(2).Infof("Garbage collection skipped: Kubernetes clientset not available")
+		return
+	}
+
 	// List all .img files in backing directory
 	files, err := filepath.Glob(filepath.Join(ns.backingDir, "*.img"))
 	if err != nil {

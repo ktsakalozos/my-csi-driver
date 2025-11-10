@@ -123,6 +123,12 @@ func (cs *ControllerServer) ControllerGetCapabilities(ctx context.Context, req *
 func (cs *ControllerServer) ControllerGetVolume(ctx context.Context, req *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
 	klog.Infof("ControllerGetVolume: %s (fetching from Kubernetes API)", req.VolumeId)
 
+	// Check if clientset is available
+	if cs.clientset == nil {
+		klog.Warningf("ControllerGetVolume: Kubernetes clientset not available, cannot fetch volume status")
+		return nil, status.Errorf(codes.Unavailable, "Kubernetes API not available - cannot determine volume status")
+	}
+
 	// Fetch the PersistentVolume object from Kubernetes API
 	pv, err := cs.clientset.CoreV1().PersistentVolumes().Get(ctx, req.VolumeId, metav1.GetOptions{})
 	if err != nil {

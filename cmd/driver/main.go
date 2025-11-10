@@ -43,13 +43,19 @@ func main() {
 
 func handle() {
 	// Create Kubernetes clientset for in-cluster configuration
+	// This is optional - if not available, driver works with reduced functionality
+	var clientset kubernetes.Interface
 	config, err := clientcmd.BuildConfigFromFlags("", "") // Use in-cluster config
 	if err != nil {
-		klog.Fatalf("Error building kubeconfig: %s", err.Error())
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		klog.Fatalf("Error building kubernetes clientset: %s", err.Error())
+		klog.Warningf("Could not build kubeconfig (driver will run with reduced functionality): %v", err)
+	} else {
+		clientset, err = kubernetes.NewForConfig(config)
+		if err != nil {
+			klog.Warningf("Could not create kubernetes clientset (driver will run with reduced functionality): %v", err)
+			clientset = nil
+		} else {
+			klog.Infof("Kubernetes clientset created successfully")
+		}
 	}
 
 	// Resolve backing directory with precedence: env -> flag -> default
