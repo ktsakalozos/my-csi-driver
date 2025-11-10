@@ -259,7 +259,7 @@ func (ns *NodeServer) garbageCollectVolumes(ctx context.Context) {
 
 	// Check if clientset is available
 	if ns.clientset == nil {
-		klog.V(2).Infof("Garbage collection skipped: Kubernetes clientset not available")
+		klog.V(2).Infof("Skipping garbage collection: Kubernetes clientset not configured")
 		return
 	}
 

@@ -42,6 +42,7 @@ func TestCSI_Metrics(t *testing.T) {
 		"-mode", "controller",
 		"-metrics-port", fmt.Sprintf("%d", metricsPort),
 		"-nodeid", "metrics-test-node",
+		"-standalone",
 	)
 	driverCmd.Env = append(os.Environ(), "CSI_BACKING_DIR="+backingDir)
 	driverCmd.Stdout = os.Stdout
@@ -263,6 +264,7 @@ func TestCSI_MetricsBasic(t *testing.T) {
 		"-mode", "controller",
 		"-metrics-port", fmt.Sprintf("%d", metricsPort),
 		"-nodeid", "basic-test-node",
+		"-standalone",
 	)
 	driverCmd.Env = append(os.Environ(), "CSI_BACKING_DIR="+backingDir)
 	driverCmd.Stdout = os.Stdout

@@ -125,8 +125,7 @@ func (cs *ControllerServer) ControllerGetVolume(ctx context.Context, req *csi.Co
 
 	// Check if clientset is available
 	if cs.clientset == nil {
-		klog.Warningf("ControllerGetVolume: Kubernetes clientset not available, cannot fetch volume status")
-		return nil, status.Errorf(codes.Unavailable, "Kubernetes API not available - cannot determine volume status")
+		return nil, status.Errorf(codes.FailedPrecondition, "Kubernetes clientset not configured - cannot query volume status")
 	}
 
 	// Fetch the PersistentVolume object from Kubernetes API

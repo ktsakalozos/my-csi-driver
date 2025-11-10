@@ -65,6 +65,7 @@ func TestCSI_Controller(t *testing.T) {
 		"-drivername", "itest-driver",
 		"-working-mount-dir", os.TempDir(),
 		"-mode", "controller",
+		"-standalone",
 	)
 	driverCmd.Env = append(os.Environ(), "CSI_BACKING_DIR="+backingDir)
 	driverCmd.Stdout = os.Stdout
@@ -220,6 +221,7 @@ func TestCSI_Node(t *testing.T) {
 		"-nodeid", "itest-node",
 		"-working-mount-dir", os.TempDir(),
 		"-mode", "node",
+		"-standalone",
 	)
 	driverCmd.Env = append(os.Environ(), "CSI_BACKING_DIR="+backingDir)
 	driverCmd.Stdout = os.Stdout
