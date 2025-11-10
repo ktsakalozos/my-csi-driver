@@ -7,29 +7,44 @@ import (
 	"testing"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestNode_PublishVolume(t *testing.T) {
-	cs := NewControllerServer("test.csi", "0.1.0")
-	volResp, err := cs.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
-		Name:          "testvol",
-		CapacityRange: &csi.CapacityRange{RequiredBytes: 1024 * 1024},
-	})
-	if err != nil {
-		t.Fatalf("CreateVolume failed: %v", err)
-	}
-	backingFile := volResp.Volume.VolumeContext["backingFile"]
+	clientset := fake.NewSimpleClientset()
 
-	ns := NewNodeServer("test-node")
+	// In the new architecture, NodeServer creates the backing file just-in-time
+	ns := NewNodeServer("test-node", "test-driver", "/tmp/my-csi-driver", clientset)
+
+	volID := "vol-test-publish"
+	backingFile := "/tmp/my-csi-driver/" + volID + ".img"
+
 	nodeReq := &csi.NodePublishVolumeRequest{
-		VolumeId:         volResp.Volume.VolumeId,
-		TargetPath:       "/tmp/my-csi-driver/test-mount",
-		VolumeContext:    map[string]string{"backingFile": backingFile},
+		VolumeId:   volID,
+		TargetPath: "/tmp/my-csi-driver/test-mount",
+		VolumeContext: map[string]string{
+			"backingFile": backingFile,
+			"size":        "1048576", // 1 MiB
+		},
 		VolumeCapability: &csi.VolumeCapability{AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{FsType: "ext4"}}},
 	}
+
 	if _, err := ns.NodePublishVolume(context.Background(), nodeReq); err != nil {
 		t.Logf("NodePublishVolume returned error (expected if not root): %v", err)
 	}
+
+	// Verify the backing file was created just-in-time
+	if info, err := os.Stat(backingFile); err == nil {
+		if info.Size() != 1048576 {
+			t.Errorf("expected backing file size 1MiB, got %d", info.Size())
+		}
+		t.Logf("Backing file created just-in-time with correct size")
+	} else {
+		t.Logf("Backing file check failed (expected if losetup failed): %v", err)
+	}
+
 	if _, err := os.Stat(nodeReq.TargetPath); err != nil {
 		t.Errorf("TargetPath not created: %v", err)
 	}
@@ -38,7 +53,8 @@ func TestNode_PublishVolume(t *testing.T) {
 }
 
 func TestNode_UnpublishVolume(t *testing.T) {
-	ns := NewNodeServer("test-node")
+	clientset := fake.NewSimpleClientset()
+	ns := NewNodeServer("test-node", "test-driver", "/tmp/my-csi-driver", clientset)
 	target := "/tmp/my-csi-driver/test-mount-unpub"
 	if err := os.MkdirAll(target, 0750); err != nil {
 		t.Fatalf("failed to create target dir: %v", err)
@@ -55,7 +71,8 @@ func TestNode_UnpublishVolume(t *testing.T) {
 }
 
 func TestNode_GetVolumeStats(t *testing.T) {
-	ns := NewNodeServer("test-node")
+	clientset := fake.NewSimpleClientset()
+	ns := NewNodeServer("test-node", "test-driver", "/tmp/my-csi-driver", clientset)
 
 	// Test 1: Missing volume path should return error
 	t.Run("MissingVolumePath", func(t *testing.T) {
@@ -123,7 +140,8 @@ func TestNode_GetVolumeStats(t *testing.T) {
 }
 
 func TestNode_GetCapabilities(t *testing.T) {
-	ns := NewNodeServer("test-node")
+	clientset := fake.NewSimpleClientset()
+	ns := NewNodeServer("test-node", "test-driver", "/tmp/my-csi-driver", clientset)
 	resp, err := ns.NodeGetCapabilities(context.Background(), &csi.NodeGetCapabilitiesRequest{})
 	if err != nil {
 		t.Fatalf("NodeGetCapabilities failed: %v", err)
@@ -139,5 +157,65 @@ func TestNode_GetCapabilities(t *testing.T) {
 	}
 	if !found {
 		t.Error("Expected GET_VOLUME_STATS capability to be advertised")
+	}
+}
+
+func TestNode_GarbageCollectVolumes(t *testing.T) {
+	// Create a temporary directory for this test
+	testDir := t.TempDir()
+
+	// Create some backing files
+	activeVolFile := filepath.Join(testDir, "vol-active.img")
+	orphanedVolFile := filepath.Join(testDir, "vol-orphaned.img")
+
+	// Create the files
+	for _, file := range []string{activeVolFile, orphanedVolFile} {
+		f, err := os.Create(file)
+		if err != nil {
+			t.Fatalf("Failed to create test file %s: %v", file, err)
+		}
+		f.Close()
+	}
+
+	// Create a fake PV for the active volume
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "vol-active",
+		},
+		Spec: corev1.PersistentVolumeSpec{
+			PersistentVolumeSource: corev1.PersistentVolumeSource{
+				CSI: &corev1.CSIPersistentVolumeSource{
+					Driver:       "test-driver",
+					VolumeHandle: "vol-active",
+					VolumeAttributes: map[string]string{
+						"backingFile": activeVolFile,
+					},
+				},
+			},
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(pv)
+	ns := NewNodeServer("test-node", "test-driver", testDir, clientset)
+
+	// Verify both files exist before GC
+	if _, err := os.Stat(activeVolFile); err != nil {
+		t.Fatalf("Active volume file should exist before GC: %v", err)
+	}
+	if _, err := os.Stat(orphanedVolFile); err != nil {
+		t.Fatalf("Orphaned volume file should exist before GC: %v", err)
+	}
+
+	// Run garbage collection
+	ns.garbageCollectVolumes(context.Background())
+
+	// Active volume should still exist
+	if _, err := os.Stat(activeVolFile); err != nil {
+		t.Errorf("Active volume file should still exist after GC: %v", err)
+	}
+
+	// Orphaned volume should be deleted
+	if _, err := os.Stat(orphanedVolFile); !os.IsNotExist(err) {
+		t.Errorf("Orphaned volume file should be deleted after GC")
 	}
 }

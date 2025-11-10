@@ -6,6 +6,8 @@ import (
 
 	"github.com/ktsakalozos/my-csi-driver/pkg/metrics"
 	"github.com/ktsakalozos/my-csi-driver/pkg/rawfile"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 	klog "k8s.io/klog/v2"
 )
 
@@ -16,6 +18,7 @@ var (
 	workingMountDir = flag.String("working-mount-dir", "/var/lib/my-csi-driver", "directory for image files backing the volumes")
 	mode            = flag.String("mode", "both", "driver mode: controller | node | both")
 	metricsPort     = flag.Int("metrics-port", 9898, "port for prometheus metrics endpoint")
+	standaloneMode  = flag.Bool("standalone", false, "run without Kubernetes API (for testing only)")
 )
 
 func main() {
@@ -40,6 +43,23 @@ func main() {
 }
 
 func handle() {
+	// Create Kubernetes clientset for in-cluster configuration
+	var clientset kubernetes.Interface
+	if *standaloneMode {
+		klog.Warningf("Running in standalone mode without Kubernetes API (testing only)")
+		clientset = nil
+	} else {
+		config, err := clientcmd.BuildConfigFromFlags("", "") // Use in-cluster config
+		if err != nil {
+			klog.Fatalf("Error building kubeconfig: %s", err.Error())
+		}
+		var err2 error
+		clientset, err2 = kubernetes.NewForConfig(config)
+		if err2 != nil {
+			klog.Fatalf("Error building kubernetes clientset: %s", err2.Error())
+		}
+	}
+
 	// Resolve backing directory with precedence: env -> flag -> default
 	backingDir := os.Getenv("CSI_BACKING_DIR")
 	if backingDir == "" {
@@ -69,6 +89,7 @@ func handle() {
 		Endpoint:   *endpoint,
 		BackingDir: backingDir,
 		Mode:       *mode,
+		Clientset:  clientset,
 	}
 	d := rawfile.NewDriver(&driverOptions)
 	d.Run(false)

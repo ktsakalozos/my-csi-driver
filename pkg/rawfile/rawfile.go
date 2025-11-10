@@ -1,7 +1,11 @@
 package rawfile
 
 import (
+	"context"
+	"time"
+
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 )
 
@@ -17,6 +21,7 @@ type DriverOptions struct {
 	VolStatsCacheExpireInMinutes int
 	RemoveArchivedVolumePath     bool
 	UseTarCommandInSnapshot      bool
+	Clientset                    kubernetes.Interface
 }
 
 type Driver struct {
@@ -26,6 +31,7 @@ type Driver struct {
 	endpoint   string
 	backingDir string
 	mode       string
+	clientset  kubernetes.Interface
 }
 
 func NewDriver(options *DriverOptions) *Driver {
@@ -38,6 +44,7 @@ func NewDriver(options *DriverOptions) *Driver {
 		endpoint:   options.Endpoint,
 		backingDir: options.BackingDir,
 		mode:       options.Mode,
+		clientset:  options.Clientset,
 	}
 
 	return d
@@ -51,12 +58,14 @@ func (d *Driver) Run(testMode bool) {
 
 	// Decide which servers to run based on mode
 	var csServer csi.ControllerServer
-	var nsServer csi.NodeServer
+	var nsServer *NodeServer
 	if d.mode == "controller" || d.mode == "both" {
-		csServer = NewControllerServerWithBackingDir(d.name, d.version, d.backingDir)
+		csServer = NewControllerServerWithBackingDir(d.name, d.version, d.backingDir, d.clientset)
 	}
 	if d.mode == "node" || d.mode == "both" {
-		nsServer = NewNodeServer(d.nodeID)
+		nsServer = NewNodeServer(d.nodeID, d.name, d.backingDir, d.clientset)
+		// Start garbage collector in a goroutine
+		go nsServer.RunGarbageCollector(context.Background(), 5*time.Minute)
 	}
 
 	s.Start(d.endpoint,

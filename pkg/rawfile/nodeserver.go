@@ -4,9 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"golang.org/x/sys/unix"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	klog "k8s.io/klog/v2"
 )
 
@@ -15,12 +20,20 @@ var _ csi.NodeServer = (*NodeServer)(nil)
 
 // NodeServer implements the CSI Node service endpoints.
 type NodeServer struct {
-	nodeID string
+	nodeID     string
+	driverName string
+	backingDir string
+	clientset  kubernetes.Interface
 	csi.UnimplementedNodeServer
 }
 
-func NewNodeServer(nodeID string) *NodeServer {
-	return &NodeServer{nodeID: nodeID}
+func NewNodeServer(nodeID, driverName, backingDir string, clientset kubernetes.Interface) *NodeServer {
+	return &NodeServer{
+		nodeID:     nodeID,
+		driverName: driverName,
+		backingDir: backingDir,
+		clientset:  clientset,
+	}
 }
 
 // NodePublishVolume mounts the volume to the target path on the node.
@@ -37,9 +50,48 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	}
 	klog.Infof("NodePublishVolume backingFile: %s", backingFile)
 
-	// Ensure backing file exists on this node (controller may have created it on another node in multi-node clusters)
-	if fi, statErr := os.Stat(backingFile); statErr != nil {
-		return nil, fmt.Errorf("backing file %s not accessible on node: %v", backingFile, statErr)
+	// Get size from volume context
+	sizeStr, ok := req.VolumeContext["size"]
+	if !ok {
+		return nil, fmt.Errorf("missing size in volume context")
+	}
+	size, err := strconv.ParseInt(sizeStr, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid size in volume context: %v", err)
+	}
+
+	// Just-in-time creation: Create backing file if it doesn't exist
+	if _, statErr := os.Stat(backingFile); statErr != nil {
+		if os.IsNotExist(statErr) {
+			klog.Infof("Backing file %s does not exist, creating just-in-time with size %d", backingFile, size)
+
+			// Ensure backing directory exists
+			backingFileDir := filepath.Dir(backingFile)
+			if err := os.MkdirAll(backingFileDir, 0750); err != nil {
+				return nil, fmt.Errorf("failed to create backing directory: %v", err)
+			}
+
+			// Create backing file
+			f, err := os.Create(backingFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create backing file: %v", err)
+			}
+			if err := f.Truncate(size); err != nil {
+				f.Close()
+				return nil, fmt.Errorf("failed to truncate backing file: %v", err)
+			}
+			f.Close()
+			klog.Infof("Created backing file %s with size %d bytes", backingFile, size)
+		} else {
+			return nil, fmt.Errorf("backing file %s not accessible on node: %v", backingFile, statErr)
+		}
+	} else {
+		klog.Infof("Backing file %s already exists", backingFile)
+	}
+
+	// Verify backing file exists and has content
+	if fi, err := os.Stat(backingFile); err != nil {
+		return nil, fmt.Errorf("backing file %s verification failed: %v", backingFile, err)
 	} else if fi.Size() == 0 {
 		klog.Warningf("backing file %s has zero size; losetup may fail", backingFile)
 	}
@@ -201,4 +253,82 @@ func (ns *NodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 
 func (ns *NodeServer) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
 	return &csi.NodeExpandVolumeResponse{}, nil
+}
+
+// garbageCollectVolumes finds and deletes orphaned backing files
+func (ns *NodeServer) garbageCollectVolumes(ctx context.Context) {
+	klog.V(2).Infof("Starting garbage collection of orphaned volumes in %s", ns.backingDir)
+
+	// Check if clientset is available
+	if ns.clientset == nil {
+		klog.V(2).Infof("Skipping garbage collection: Kubernetes clientset not configured")
+		return
+	}
+
+	// List all .img files in backing directory
+	files, err := filepath.Glob(filepath.Join(ns.backingDir, "*.img"))
+	if err != nil {
+		klog.Errorf("Failed to list backing files: %v", err)
+		return
+	}
+
+	if len(files) == 0 {
+		klog.V(2).Infof("No backing files found in %s", ns.backingDir)
+		return
+	}
+
+	// List all PersistentVolumes from Kubernetes
+	pvList, err := ns.clientset.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		klog.Errorf("Failed to list PersistentVolumes: %v", err)
+		return
+	}
+
+	// Build a map of active volume handles for CSI volumes belonging to this driver
+	activeVolumes := make(map[string]bool)
+	for _, pv := range pvList.Items {
+		// Only consider PVs managed by this driver
+		if pv.Spec.CSI != nil && pv.Spec.CSI.Driver == ns.driverName && pv.Spec.CSI.VolumeHandle != "" {
+			// Extract volume ID from backing file path if present
+			if backingFile, ok := pv.Spec.CSI.VolumeAttributes["backingFile"]; ok {
+				activeVolumes[backingFile] = true
+			}
+			// Also track by volume handle/ID
+			volumeFile := filepath.Join(ns.backingDir, pv.Spec.CSI.VolumeHandle+".img")
+			activeVolumes[volumeFile] = true
+		}
+	}
+
+	// Check each backing file
+	deletedCount := 0
+	for _, file := range files {
+		if !activeVolumes[file] {
+			// File is orphaned, delete it
+			klog.Infof("Deleting orphaned backing file: %s", file)
+			if err := os.Remove(file); err != nil {
+				klog.Errorf("Failed to delete orphaned file %s: %v", file, err)
+			} else {
+				deletedCount++
+			}
+		}
+	}
+
+	klog.V(2).Infof("Garbage collection complete: deleted %d orphaned files out of %d total backing files", deletedCount, len(files))
+}
+
+// RunGarbageCollector runs the garbage collector periodically
+func (ns *NodeServer) RunGarbageCollector(ctx context.Context, interval time.Duration) {
+	klog.Infof("Starting garbage collector with interval %v", interval)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			klog.Infof("Garbage collector stopped")
+			return
+		case <-ticker.C:
+			ns.garbageCollectVolumes(ctx)
+		}
+	}
 }

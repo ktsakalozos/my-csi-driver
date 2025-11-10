@@ -2,13 +2,17 @@ package rawfile
 
 import (
 	"context"
-	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	klog "k8s.io/klog/v2"
 )
 
@@ -17,6 +21,7 @@ type ControllerServer struct {
 	name       string
 	version    string
 	backingDir string
+	clientset  kubernetes.Interface
 	csi.UnimplementedControllerServer
 }
 
@@ -25,16 +30,16 @@ var _ csi.ControllerServer = (*ControllerServer)(nil)
 
 // NewControllerServer creates a controller with backingDir resolved from env/defaults.
 // It preserves previous behavior where CSI_BACKING_DIR env var was used.
-func NewControllerServer(name, version string) *ControllerServer {
+func NewControllerServer(name, version string, clientset kubernetes.Interface) *ControllerServer {
 	dir := os.Getenv("CSI_BACKING_DIR")
 	if dir == "" {
 		dir = "/var/lib/my-csi-driver"
 	}
-	return &ControllerServer{name: name, version: version, backingDir: dir}
+	return &ControllerServer{name: name, version: version, backingDir: dir, clientset: clientset}
 }
 
 // NewControllerServerWithBackingDir creates a controller with an explicit backingDir.
-func NewControllerServerWithBackingDir(name, version, backingDir string) *ControllerServer {
+func NewControllerServerWithBackingDir(name, version, backingDir string, clientset kubernetes.Interface) *ControllerServer {
 	dir := backingDir
 	if dir == "" {
 		// Fall back to env, then default
@@ -43,12 +48,12 @@ func NewControllerServerWithBackingDir(name, version, backingDir string) *Contro
 			dir = "/var/lib/my-csi-driver"
 		}
 	}
-	return &ControllerServer{name: name, version: version, backingDir: dir}
+	return &ControllerServer{name: name, version: version, backingDir: dir, clientset: clientset}
 }
 
 func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	volID := "vol-" + uuid.New().String()
-	klog.Infof("CreateVolume: %s", volID)
+	klog.Infof("CreateVolume: %s (logical creation)", volID)
 
 	// Get volume size in bytes
 	size := req.CapacityRange.GetRequiredBytes()
@@ -56,46 +61,25 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		size = 1 << 30 // Default to 1GiB
 	}
 
-	// Ensure backing directory exists
-	if err := os.MkdirAll(cs.backingDir, 0750); err != nil {
-		return nil, err
-	}
+	// Define backing file path (will be created by NodeServer)
 	backingFile := cs.backingDir + "/" + volID + ".img"
-	klog.Infof("CreateVolume backingFile: %s", backingFile)
+	klog.Infof("CreateVolume backingFile: %s (deferred to node)", backingFile)
 
-	// Create backing file
-	f, err := os.Create(backingFile)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	if err := f.Truncate(size); err != nil {
-		return nil, err
-	}
-
-	// Return volume context with file path
+	// Return volume context with file path and size metadata
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      volID,
 			CapacityBytes: size,
 			VolumeContext: map[string]string{
 				"backingFile": backingFile,
+				"size":        strconv.FormatInt(size, 10),
 			},
 		},
 	}, nil
 }
 
 func (cs *ControllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
-	klog.Infof("DeleteVolume: %s", req.VolumeId)
-
-	backingFile := cs.backingDir + "/" + req.VolumeId + ".img"
-	klog.Infof("DeleteVolume backingFile: %s", backingFile)
-
-	// Remove backing file if it exists
-	if err := os.Remove(backingFile); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to remove backing file: %v", err)
-	}
-
+	klog.Infof("DeleteVolume: %s (logical deletion, physical cleanup handled by node garbage collector)", req.VolumeId)
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
@@ -137,25 +121,57 @@ func (cs *ControllerServer) ControllerGetCapabilities(ctx context.Context, req *
 }
 
 func (cs *ControllerServer) ControllerGetVolume(ctx context.Context, req *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
-	backingFile := cs.backingDir + "/" + req.VolumeId + ".img"
-	klog.Infof("ControllerGetVolume backingFile: %s", backingFile)
+	klog.Infof("ControllerGetVolume: %s (fetching from Kubernetes API)", req.VolumeId)
 
-	fi, err := os.Stat(backingFile)
+	// Check if clientset is available
+	if cs.clientset == nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "Kubernetes clientset not configured - cannot query volume status")
+	}
+
+	// Fetch the PersistentVolume object from Kubernetes API
+	pv, err := cs.clientset.CoreV1().PersistentVolumes().Get(ctx, req.VolumeId, metav1.GetOptions{})
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.IsNotFound(err) {
 			return nil, status.Errorf(codes.NotFound, "volume %s not found", req.VolumeId)
 		}
 		return nil, status.Errorf(codes.Internal, "error accessing volume: %v", err)
 	}
 
-	// Return basic volume info
+	// Verify that this PV belongs to our driver
+	if pv.Spec.CSI == nil || pv.Spec.CSI.Driver != cs.name {
+		return nil, status.Errorf(codes.NotFound, "volume %s not managed by driver %s", req.VolumeId, cs.name)
+	}
+
+	// Extract capacity from PV spec
+	var capacityBytes int64
+	if capacity, ok := pv.Spec.Capacity[corev1.ResourceStorage]; ok {
+		capacityBytes = capacity.Value()
+	}
+
+	// Extract backing file and size from volume attributes
+	backingFile := ""
+	size := ""
+	if pv.Spec.CSI.VolumeAttributes != nil {
+		backingFile = pv.Spec.CSI.VolumeAttributes["backingFile"]
+		size = pv.Spec.CSI.VolumeAttributes["size"]
+	}
+
+	// Return volume info from Kubernetes API
+	volumeContext := map[string]string{
+		"backingFile": backingFile,
+	}
+	// Include size if available from PV attributes, otherwise use capacity
+	if size != "" {
+		volumeContext["size"] = size
+	} else if capacityBytes > 0 {
+		volumeContext["size"] = strconv.FormatInt(capacityBytes, 10)
+	}
+
 	return &csi.ControllerGetVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      req.VolumeId,
-			CapacityBytes: fi.Size(),
-			VolumeContext: map[string]string{
-				"backingFile": backingFile,
-			},
+			CapacityBytes: capacityBytes,
+			VolumeContext: volumeContext,
 		},
 	}, nil
 }
