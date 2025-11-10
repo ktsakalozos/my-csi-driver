@@ -7,6 +7,8 @@ import (
 	"github.com/ktsakalozos/my-csi-driver/pkg/metrics"
 	"github.com/ktsakalozos/my-csi-driver/pkg/rawfile"
 	klog "k8s.io/klog/v2"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var (
@@ -40,6 +42,16 @@ func main() {
 }
 
 func handle() {
+	// Create Kubernetes clientset for in-cluster configuration
+	config, err := clientcmd.BuildConfigFromFlags("", "") // Use in-cluster config
+	if err != nil {
+		klog.Fatalf("Error building kubeconfig: %s", err.Error())
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		klog.Fatalf("Error building kubernetes clientset: %s", err.Error())
+	}
+
 	// Resolve backing directory with precedence: env -> flag -> default
 	backingDir := os.Getenv("CSI_BACKING_DIR")
 	if backingDir == "" {
@@ -69,6 +81,7 @@ func handle() {
 		Endpoint:   *endpoint,
 		BackingDir: backingDir,
 		Mode:       *mode,
+		Clientset:  clientset,
 	}
 	d := rawfile.NewDriver(&driverOptions)
 	d.Run(false)
