@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -101,7 +102,6 @@ READY:
 	t.Skip("Controller-only mode doesn't create backing files in topology-aware architecture")
 }
 
-
 // Node-only integration test
 func TestCSI_Node(t *testing.T) {
 	if os.Geteuid() != 0 {
@@ -125,14 +125,6 @@ func TestCSI_Node(t *testing.T) {
 	_ = os.MkdirAll(backingDir, 0o755)
 	volID := fmt.Sprintf("vol-node-%d", time.Now().UnixNano())
 	backingFile := filepath.Join(backingDir, volID+".img")
-	f, err := os.Create(backingFile)
-	if err != nil {
-		t.Fatalf("create backing file: %v", err)
-	}
-	if err := f.Truncate(1 << 20); err != nil {
-		t.Fatalf("truncate backing file: %v", err)
-	}
-	f.Close()
 
 	driverCmd := exec.Command(bin,
 		"-endpoint", endpoint,
@@ -182,7 +174,7 @@ READY:
 		AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{FsType: "ext4"}},
 		AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER},
 	}
-	pubReq := &csi.NodePublishVolumeRequest{VolumeId: volID, TargetPath: targetPath, VolumeCapability: capability, VolumeContext: map[string]string{"backingFile": backingFile}}
+	pubReq := &csi.NodePublishVolumeRequest{VolumeId: volID, TargetPath: targetPath, VolumeCapability: capability, VolumeContext: map[string]string{"backingFile": backingFile, "size": strconv.FormatInt(1024*1024, 10)}}
 	if _, err := nc.NodePublishVolume(context.Background(), pubReq); err != nil {
 		t.Fatalf("NodePublishVolume failed: %v", err)
 	}
