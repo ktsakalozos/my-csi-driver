@@ -24,3 +24,21 @@ func TestIdentity_GetPluginCapabilities_ControllerService(t *testing.T) {
 		t.Errorf("Controller service capability not reported")
 	}
 }
+
+func TestIdentity_GetPluginCapabilities_VolumeAccessibilityConstraints(t *testing.T) {
+	is := NewIdentityServer("my-csi-driver", "v1.0.0")
+	resp, err := is.GetPluginCapabilities(context.Background(), &csi.GetPluginCapabilitiesRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, cap := range resp.Capabilities {
+		if cap.GetService().GetType() == csi.PluginCapability_Service_VOLUME_ACCESSIBILITY_CONSTRAINTS {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Volume accessibility constraints capability not reported")
+	}
+}
