@@ -2,6 +2,7 @@ package rawfile
 
 import (
 	"context"
+	"os"
 	"strconv"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -30,7 +31,10 @@ var _ csi.ControllerServer = (*ControllerServer)(nil)
 // NewControllerServer creates a controller with backingDir resolved from env/defaults.
 // It preserves previous behavior where CSI_BACKING_DIR env var was used.
 func NewControllerServer(name, version string, clientset kubernetes.Interface) *ControllerServer {
-	dir := "/var/lib/my-csi-driver"
+	dir := os.Getenv("CSI_BACKING_DIR")
+	if dir == "" {
+		dir = "/var/lib/my-csi-driver"
+	}
 	return &ControllerServer{name: name, version: version, backingDir: dir, clientset: clientset}
 }
 
@@ -38,7 +42,11 @@ func NewControllerServer(name, version string, clientset kubernetes.Interface) *
 func NewControllerServerWithBackingDir(name, version, backingDir string, clientset kubernetes.Interface) *ControllerServer {
 	dir := backingDir
 	if dir == "" {
-		dir = "/var/lib/my-csi-driver"
+		// Fall back to env, then default
+		dir = os.Getenv("CSI_BACKING_DIR")
+		if dir == "" {
+			dir = "/var/lib/my-csi-driver"
+		}
 	}
 	return &ControllerServer{name: name, version: version, backingDir: dir, clientset: clientset}
 }
