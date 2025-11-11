@@ -146,3 +146,116 @@ func TestController_GetVolume(t *testing.T) {
 		t.Errorf("expected error for missing volume, got nil")
 	}
 }
+
+func TestController_CreateVolume_WithTopology(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	cs := NewControllerServerWithBackingDir("test.csi", "0.1.0", "/tmp/my-csi-driver", clientset)
+
+	// Test with preferred topology
+	req := &csi.CreateVolumeRequest{
+		Name:          "testvol-topology",
+		CapacityRange: &csi.CapacityRange{RequiredBytes: 1024 * 1024},
+		AccessibilityRequirements: &csi.TopologyRequirement{
+			Preferred: []*csi.Topology{
+				{
+					Segments: map[string]string{
+						"topology.kubernetes.io/hostname": "test-node-1",
+					},
+				},
+			},
+		},
+	}
+
+	resp, err := cs.CreateVolume(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+
+	if resp.Volume == nil {
+		t.Fatalf("Volume not returned")
+	}
+
+	// Check that topology is set from preferred
+	if resp.Volume.AccessibleTopology == nil || len(resp.Volume.AccessibleTopology) == 0 {
+		t.Fatalf("AccessibleTopology not set")
+	}
+
+	topology := resp.Volume.AccessibleTopology[0]
+	if topology.Segments == nil {
+		t.Fatalf("Topology segments not set")
+	}
+
+	hostname, ok := topology.Segments["topology.kubernetes.io/hostname"]
+	if !ok {
+		t.Fatalf("topology.kubernetes.io/hostname not found in topology segments")
+	}
+
+	if hostname != "test-node-1" {
+		t.Errorf("expected hostname 'test-node-1', got '%s'", hostname)
+	}
+}
+
+func TestController_CreateVolume_WithRequisiteTopology(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	cs := NewControllerServerWithBackingDir("test.csi", "0.1.0", "/tmp/my-csi-driver", clientset)
+
+	// Test with requisite topology (no preferred)
+	req := &csi.CreateVolumeRequest{
+		Name:          "testvol-requisite",
+		CapacityRange: &csi.CapacityRange{RequiredBytes: 1024 * 1024},
+		AccessibilityRequirements: &csi.TopologyRequirement{
+			Requisite: []*csi.Topology{
+				{
+					Segments: map[string]string{
+						"topology.kubernetes.io/hostname": "test-node-2",
+					},
+				},
+			},
+		},
+	}
+
+	resp, err := cs.CreateVolume(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+
+	if resp.Volume == nil {
+		t.Fatalf("Volume not returned")
+	}
+
+	// Check that topology is set from requisite
+	if resp.Volume.AccessibleTopology == nil || len(resp.Volume.AccessibleTopology) == 0 {
+		t.Fatalf("AccessibleTopology not set")
+	}
+
+	topology := resp.Volume.AccessibleTopology[0]
+	hostname := topology.Segments["topology.kubernetes.io/hostname"]
+	if hostname != "test-node-2" {
+		t.Errorf("expected hostname 'test-node-2', got '%s'", hostname)
+	}
+}
+
+func TestController_CreateVolume_WithoutTopology(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	cs := NewControllerServerWithBackingDir("test.csi", "0.1.0", "/tmp/my-csi-driver", clientset)
+
+	// Test without topology requirements
+	req := &csi.CreateVolumeRequest{
+		Name:          "testvol-no-topology",
+		CapacityRange: &csi.CapacityRange{RequiredBytes: 1024 * 1024},
+	}
+
+	resp, err := cs.CreateVolume(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+
+	if resp.Volume == nil {
+		t.Fatalf("Volume not returned")
+	}
+
+	// Check that topology is not set when no requirements provided
+	if resp.Volume.AccessibleTopology != nil && len(resp.Volume.AccessibleTopology) > 0 {
+		t.Errorf("AccessibleTopology should not be set when no requirements provided")
+	}
+}
