@@ -15,7 +15,7 @@
 #   SKIP_CLEANUP         - Set to 'true' to skip cleanup on success (default: false)
 #   CHART_PATH           - Path to Helm chart (default: ./charts/my-csi-driver)
 
-set -euo pipefail
+set -xeuo pipefail
 
 # Default values
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-csi-e2e}"
