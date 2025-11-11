@@ -82,7 +82,7 @@ cleanup() {
 }
 
 # Register cleanup function
-trap cleanup EXIT
+# trap cleanup EXIT
 
 echo ""
 echo "========================================="
