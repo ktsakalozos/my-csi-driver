@@ -184,17 +184,16 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 }
 
 func (ns *NodeServer) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
-	// Advertise node-level topology so the provisioner can derive accessibility requirements
-	// and the node-driver-registrar can publish topologyKeys on CSINode.
-	// We use the standard hostname key which matches a Node label Kubernetes sets.
-	topo := &csi.Topology{
-		Segments: map[string]string{
-			"topology.kubernetes.io/hostname": ns.nodeID,
-		},
-	}
+	// Advertise node-local topology using the standard hostname label.
+	// Using "kubernetes.io/hostname" avoids attempts by the registrar to set protected
+	// topology.kubernetes.io/* node labels. The label should already exist on the Node.
 	return &csi.NodeGetInfoResponse{
-		NodeId:             ns.nodeID,
-		AccessibleTopology: topo,
+		NodeId: ns.nodeID,
+		AccessibleTopology: &csi.Topology{
+			Segments: map[string]string{
+				"kubernetes.io/hostname": ns.nodeID,
+			},
+		},
 	}, nil
 }
 
