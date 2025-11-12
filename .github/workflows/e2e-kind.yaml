@@ -60,7 +60,3 @@ jobs:
       - name: Run e2e tests
         run: |
           make e2e-tests IMG=$IMG REGISTRY=$REGISTRY KIND_CLUSTER_NAME=$KIND_CLUSTER_NAME
-
-      - name: Setup tmate session
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
