@@ -184,7 +184,17 @@ func (ns *NodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 }
 
 func (ns *NodeServer) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
-	return &csi.NodeGetInfoResponse{NodeId: ns.nodeID}, nil
+	// Advertise node-local topology using the standard hostname label.
+	// Using "kubernetes.io/hostname" avoids attempts by the registrar to set protected
+	// topology.kubernetes.io/* node labels. The label should already exist on the Node.
+	return &csi.NodeGetInfoResponse{
+		NodeId: ns.nodeID,
+		AccessibleTopology: &csi.Topology{
+			Segments: map[string]string{
+				"kubernetes.io/hostname": ns.nodeID,
+			},
+		},
+	}, nil
 }
 
 func (ns *NodeServer) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {

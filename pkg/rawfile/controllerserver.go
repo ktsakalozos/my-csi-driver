@@ -65,8 +65,8 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	backingFile := cs.backingDir + "/" + volID + ".img"
 	klog.Infof("CreateVolume backingFile: %s (deferred to node)", backingFile)
 
-	// Return volume context with file path and size metadata
-	return &csi.CreateVolumeResponse{
+	// Prepare response
+	resp := &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      volID,
 			CapacityBytes: size,
@@ -75,7 +75,23 @@ func (cs *ControllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 				"size":        strconv.FormatInt(size, 10),
 			},
 		},
-	}, nil
+	}
+
+	// Handle topology: if the external-provisioner provides preferred topology,
+	// use the first preferred topology to indicate where the volume will be accessible.
+	// This works with the JIT file creation model because the file will be created
+	// on the node where the pod is scheduled, which matches the topology constraint.
+	if req.AccessibilityRequirements != nil && len(req.AccessibilityRequirements.Preferred) > 0 {
+		// Use the first preferred topology
+		resp.Volume.AccessibleTopology = []*csi.Topology{req.AccessibilityRequirements.Preferred[0]}
+		klog.Infof("CreateVolume: set AccessibleTopology from preferred: %+v", req.AccessibilityRequirements.Preferred[0])
+	} else if req.AccessibilityRequirements != nil && len(req.AccessibilityRequirements.Requisite) > 0 {
+		// Fall back to first requisite topology if no preferred
+		resp.Volume.AccessibleTopology = []*csi.Topology{req.AccessibilityRequirements.Requisite[0]}
+		klog.Infof("CreateVolume: set AccessibleTopology from requisite: %+v", req.AccessibilityRequirements.Requisite[0])
+	}
+
+	return resp, nil
 }
 
 func (cs *ControllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
