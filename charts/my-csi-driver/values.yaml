@@ -7,6 +7,7 @@ controller:
   enabled: true
   replicas: 1
   provisionerImage: registry.k8s.io/sig-storage/csi-provisioner:v5.0.1
+  snapshotterImage: registry.k8s.io/sig-storage/csi-snapshotter:v6.3.3
 
 node:
   registrarImage: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.10.1
