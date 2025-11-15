@@ -261,142 +261,142 @@ func TestController_CreateVolume_WithoutTopology(t *testing.T) {
 }
 
 func TestController_GetCapabilities_Snapshots(t *testing.T) {
-clientset := fake.NewSimpleClientset()
-cs := NewControllerServer("my-csi-driver", "v1.0.0", clientset)
-resp, err := cs.ControllerGetCapabilities(context.Background(), &csi.ControllerGetCapabilitiesRequest{})
-if err != nil {
-t.Fatalf("unexpected error: %v", err)
-}
+	clientset := fake.NewSimpleClientset()
+	cs := NewControllerServer("my-csi-driver", "v1.0.0", clientset)
+	resp, err := cs.ControllerGetCapabilities(context.Background(), &csi.ControllerGetCapabilitiesRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-foundCreateDelete := false
-foundList := false
-for _, cap := range resp.Capabilities {
-if cap.GetRpc().GetType() == csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT {
-foundCreateDelete = true
-}
-if cap.GetRpc().GetType() == csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS {
-foundList = true
-}
-}
-if !foundCreateDelete {
-t.Errorf("Create/Delete snapshot capability not reported")
-}
-if !foundList {
-t.Errorf("List snapshots capability not reported")
-}
+	foundCreateDelete := false
+	foundList := false
+	for _, cap := range resp.Capabilities {
+		if cap.GetRpc().GetType() == csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT {
+			foundCreateDelete = true
+		}
+		if cap.GetRpc().GetType() == csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS {
+			foundList = true
+		}
+	}
+	if !foundCreateDelete {
+		t.Errorf("Create/Delete snapshot capability not reported")
+	}
+	if !foundList {
+		t.Errorf("List snapshots capability not reported")
+	}
 }
 
 func TestController_CreateVolume_FromSnapshot(t *testing.T) {
-clientset := fake.NewSimpleClientset()
-cs := NewControllerServerWithBackingDir("test.csi", "0.1.0", "/tmp/my-csi-driver", clientset)
+	clientset := fake.NewSimpleClientset()
+	cs := NewControllerServerWithBackingDir("test.csi", "0.1.0", "/tmp/my-csi-driver", clientset)
 
-snapID := "snap-test-123"
-req := &csi.CreateVolumeRequest{
-Name:          "testvol-from-snap",
-CapacityRange: &csi.CapacityRange{RequiredBytes: 1024 * 1024},
-VolumeContentSource: &csi.VolumeContentSource{
-Type: &csi.VolumeContentSource_Snapshot{
-Snapshot: &csi.VolumeContentSource_SnapshotSource{
-SnapshotId: snapID,
-},
-},
-},
-}
+	snapID := "snap-test-123"
+	req := &csi.CreateVolumeRequest{
+		Name:          "testvol-from-snap",
+		CapacityRange: &csi.CapacityRange{RequiredBytes: 1024 * 1024},
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: snapID,
+				},
+			},
+		},
+	}
 
-resp, err := cs.CreateVolume(context.Background(), req)
-if err != nil {
-t.Fatalf("CreateVolume failed: %v", err)
-}
+	resp, err := cs.CreateVolume(context.Background(), req)
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
 
-if resp.Volume == nil {
-t.Fatalf("Volume not returned")
-}
+	if resp.Volume == nil {
+		t.Fatalf("Volume not returned")
+	}
 
-// Verify snapshot context is set
-restoreFrom := resp.Volume.VolumeContext["restoreFromSnapshot"]
-if restoreFrom != snapID {
-t.Errorf("expected restoreFromSnapshot=%s, got %s", snapID, restoreFrom)
-}
+	// Verify snapshot context is set
+	restoreFrom := resp.Volume.VolumeContext["restoreFromSnapshot"]
+	if restoreFrom != snapID {
+		t.Errorf("expected restoreFromSnapshot=%s, got %s", snapID, restoreFrom)
+	}
 
-snapFile := resp.Volume.VolumeContext["snapshotFile"]
-expectedSnapFile := "/tmp/my-csi-driver/snap-" + snapID + ".img"
-if snapFile != expectedSnapFile {
-t.Errorf("expected snapshotFile=%s, got %s", expectedSnapFile, snapFile)
-}
+	snapFile := resp.Volume.VolumeContext["snapshotFile"]
+	expectedSnapFile := "/tmp/my-csi-driver/snap-" + snapID + ".img"
+	if snapFile != expectedSnapFile {
+		t.Errorf("expected snapshotFile=%s, got %s", expectedSnapFile, snapFile)
+	}
 }
 
 func TestController_ListSnapshots(t *testing.T) {
-clientset := fake.NewSimpleClientset()
-cs := NewControllerServer("test.csi", "0.1.0", clientset)
+	clientset := fake.NewSimpleClientset()
+	cs := NewControllerServer("test.csi", "0.1.0", clientset)
 
-// Test with snapshot ID
-snapID := "snap-test-456"
-resp, err := cs.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{
-SnapshotId: snapID,
-})
-if err != nil {
-t.Fatalf("ListSnapshots failed: %v", err)
-}
+	// Test with snapshot ID
+	snapID := "snap-test-456"
+	resp, err := cs.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{
+		SnapshotId: snapID,
+	})
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
 
-if len(resp.Entries) != 1 {
-t.Fatalf("expected 1 entry, got %d", len(resp.Entries))
-}
+	if len(resp.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(resp.Entries))
+	}
 
-if resp.Entries[0].Snapshot.SnapshotId != snapID {
-t.Errorf("expected snapshot ID %s, got %s", snapID, resp.Entries[0].Snapshot.SnapshotId)
-}
+	if resp.Entries[0].Snapshot.SnapshotId != snapID {
+		t.Errorf("expected snapshot ID %s, got %s", snapID, resp.Entries[0].Snapshot.SnapshotId)
+	}
 
-// Test without snapshot ID (should return empty list)
-resp2, err := cs.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{})
-if err != nil {
-t.Fatalf("ListSnapshots failed: %v", err)
-}
+	// Test without snapshot ID (should return empty list)
+	resp2, err := cs.ListSnapshots(context.Background(), &csi.ListSnapshotsRequest{})
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
 
-if len(resp2.Entries) != 0 {
-t.Errorf("expected 0 entries for empty request, got %d", len(resp2.Entries))
-}
+	if len(resp2.Entries) != 0 {
+		t.Errorf("expected 0 entries for empty request, got %d", len(resp2.Entries))
+	}
 }
 
 func TestExtractNodeHostnameFromPV(t *testing.T) {
-// Test with node affinity
-pv := &corev1.PersistentVolume{
-ObjectMeta: metav1.ObjectMeta{
-Name: "test-pv",
-},
-Spec: corev1.PersistentVolumeSpec{
-NodeAffinity: &corev1.VolumeNodeAffinity{
-Required: &corev1.NodeSelector{
-NodeSelectorTerms: []corev1.NodeSelectorTerm{
-{
-MatchExpressions: []corev1.NodeSelectorRequirement{
-{
-Key:      "kubernetes.io/hostname",
-Operator: corev1.NodeSelectorOpIn,
-Values:   []string{"test-node-1"},
-},
-},
-},
-},
-},
-},
-},
-}
+	// Test with node affinity
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-pv",
+		},
+		Spec: corev1.PersistentVolumeSpec{
+			NodeAffinity: &corev1.VolumeNodeAffinity{
+				Required: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{
+						{
+							MatchExpressions: []corev1.NodeSelectorRequirement{
+								{
+									Key:      "kubernetes.io/hostname",
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"test-node-1"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
 
-nodeName := extractNodeHostnameFromPV(pv)
-if nodeName != "test-node-1" {
-t.Errorf("expected node name 'test-node-1', got '%s'", nodeName)
-}
+	nodeName := extractNodeHostnameFromPV(pv)
+	if nodeName != "test-node-1" {
+		t.Errorf("expected node name 'test-node-1', got '%s'", nodeName)
+	}
 
-// Test without node affinity
-pvNoAffinity := &corev1.PersistentVolume{
-ObjectMeta: metav1.ObjectMeta{
-Name: "test-pv-no-affinity",
-},
-Spec: corev1.PersistentVolumeSpec{},
-}
+	// Test without node affinity
+	pvNoAffinity := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-pv-no-affinity",
+		},
+		Spec: corev1.PersistentVolumeSpec{},
+	}
 
-nodeName2 := extractNodeHostnameFromPV(pvNoAffinity)
-if nodeName2 != "" {
-t.Errorf("expected empty node name for PV without affinity, got '%s'", nodeName2)
-}
+	nodeName2 := extractNodeHostnameFromPV(pvNoAffinity)
+	if nodeName2 != "" {
+		t.Errorf("expected empty node name for PV without affinity, got '%s'", nodeName2)
+	}
 }

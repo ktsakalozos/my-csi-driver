@@ -314,7 +314,7 @@ func (cs *ControllerServer) DeleteSnapshot(ctx context.Context, req *csi.DeleteS
 	}
 
 	snapID := req.GetSnapshotId()
-	// Try to delete on all nodes (best-effort); ignore failures. 
+	// Try to delete on all nodes (best-effort); ignore failures.
 	// Simplest approach: attempt delete everywhere; treat not found as success.
 	klog.Infof("DeleteSnapshot: attempting to delete snapshot %s", snapID)
 	if err := runNodeDeletePodAllNodes(ctx, cs.clientset, cs.backingDir, cs.backingDir+"/"+snapID+".img"); err != nil {
@@ -340,268 +340,268 @@ func (cs *ControllerServer) ListSnapshots(ctx context.Context, req *csi.ListSnap
 
 // extractNodeHostnameFromPV extracts the node hostname from PV's node affinity
 func extractNodeHostnameFromPV(pv *corev1.PersistentVolume) string {
-if pv.Spec.NodeAffinity == nil || pv.Spec.NodeAffinity.Required == nil {
-return ""
-}
-for _, term := range pv.Spec.NodeAffinity.Required.NodeSelectorTerms {
-for _, expr := range term.MatchExpressions {
-if expr.Key == "kubernetes.io/hostname" && len(expr.Values) > 0 {
-return expr.Values[0]
-}
-}
-}
-return ""
+	if pv.Spec.NodeAffinity == nil || pv.Spec.NodeAffinity.Required == nil {
+		return ""
+	}
+	for _, term := range pv.Spec.NodeAffinity.Required.NodeSelectorTerms {
+		for _, expr := range term.MatchExpressions {
+			if expr.Key == "kubernetes.io/hostname" && len(expr.Values) > 0 {
+				return expr.Values[0]
+			}
+		}
+	}
+	return ""
 }
 
 // runNodeCopyPod creates a pod on the specified node to copy a file
 func runNodeCopyPod(ctx context.Context, client kubernetes.Interface, nodeName, hostDir, src, dst string) error {
-podName := "csi-snapshot-copy-" + uuid.New().String()[:8]
-namespace := "kube-system" // Use kube-system for privileged operations
+	podName := "csi-snapshot-copy-" + uuid.New().String()[:8]
+	namespace := "kube-system" // Use kube-system for privileged operations
 
-// Create a pod with hostPath mount to perform the copy
-pod := &corev1.Pod{
-ObjectMeta: metav1.ObjectMeta{
-Name:      podName,
-Namespace: namespace,
-},
-Spec: corev1.PodSpec{
-NodeSelector: map[string]string{
-"kubernetes.io/hostname": nodeName,
-},
-RestartPolicy: corev1.RestartPolicyNever,
-Containers: []corev1.Container{
-{
-Name:    "copy",
-Image:   "busybox:latest",
-Command: []string{"/bin/sh", "-c"},
-Args: []string{
-fmt.Sprintf("cp --reflink=auto -f %s %s || cat %s > %s", src, dst, src, dst),
-},
-VolumeMounts: []corev1.VolumeMount{
-{
-Name:      "data-dir",
-MountPath: hostDir,
-},
-},
-},
-},
-Volumes: []corev1.Volume{
-{
-Name: "data-dir",
-VolumeSource: corev1.VolumeSource{
-HostPath: &corev1.HostPathVolumeSource{
-Path: hostDir,
-Type: func() *corev1.HostPathType { t := corev1.HostPathDirectoryOrCreate; return &t }(),
-},
-},
-},
-},
-},
-}
+	// Create a pod with hostPath mount to perform the copy
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: namespace,
+		},
+		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				"kubernetes.io/hostname": nodeName,
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:    "copy",
+					Image:   "busybox:latest",
+					Command: []string{"/bin/sh", "-c"},
+					Args: []string{
+						fmt.Sprintf("cp --reflink=auto -f %s %s || cat %s > %s", src, dst, src, dst),
+					},
+					VolumeMounts: []corev1.VolumeMount{
+						{
+							Name:      "data-dir",
+							MountPath: hostDir,
+						},
+					},
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "data-dir",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: hostDir,
+							Type: func() *corev1.HostPathType { t := corev1.HostPathDirectoryOrCreate; return &t }(),
+						},
+					},
+				},
+			},
+		},
+	}
 
-// Create the pod
-if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
-return fmt.Errorf("failed to create pod: %v", err)
-}
-defer func() {
-// Clean up the pod
-_ = client.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
-}()
+	// Create the pod
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("failed to create pod: %v", err)
+	}
+	defer func() {
+		// Clean up the pod
+		_ = client.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
+	}()
 
-// Wait for pod to complete (with timeout)
-timeout := time.After(2 * time.Minute)
-ticker := time.NewTicker(2 * time.Second)
-defer ticker.Stop()
+	// Wait for pod to complete (with timeout)
+	timeout := time.After(2 * time.Minute)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
-for {
-select {
-case <-timeout:
-return fmt.Errorf("timeout waiting for copy pod to complete")
-case <-ticker.C:
-p, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
-if err != nil {
-return fmt.Errorf("failed to get pod status: %v", err)
-}
-if p.Status.Phase == corev1.PodSucceeded {
-klog.Infof("Copy pod %s completed successfully", podName)
-return nil
-}
-if p.Status.Phase == corev1.PodFailed {
-return fmt.Errorf("copy pod failed with phase: %s", p.Status.Phase)
-}
-}
-}
+	for {
+		select {
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for copy pod to complete")
+		case <-ticker.C:
+			p, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to get pod status: %v", err)
+			}
+			if p.Status.Phase == corev1.PodSucceeded {
+				klog.Infof("Copy pod %s completed successfully", podName)
+				return nil
+			}
+			if p.Status.Phase == corev1.PodFailed {
+				return fmt.Errorf("copy pod failed with phase: %s", p.Status.Phase)
+			}
+		}
+	}
 }
 
 // runNodeDeletePodAllNodes attempts to delete a file on all nodes (best-effort)
 func runNodeDeletePodAllNodes(ctx context.Context, client kubernetes.Interface, hostDir, filePath string) error {
-// List all nodes
-nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-if err != nil {
-return fmt.Errorf("failed to list nodes: %v", err)
-}
+	// List all nodes
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list nodes: %v", err)
+	}
 
-// For each node, try to delete the file (best-effort)
-for _, node := range nodes.Items {
-nodeName := node.Name
-if err := runNodeDeletePod(ctx, client, nodeName, hostDir, filePath); err != nil {
-klog.V(2).Infof("Failed to delete file on node %s (ignoring): %v", nodeName, err)
-}
-}
-return nil
+	// For each node, try to delete the file (best-effort)
+	for _, node := range nodes.Items {
+		nodeName := node.Name
+		if err := runNodeDeletePod(ctx, client, nodeName, hostDir, filePath); err != nil {
+			klog.V(2).Infof("Failed to delete file on node %s (ignoring): %v", nodeName, err)
+		}
+	}
+	return nil
 }
 
 // runNodeDeletePod creates a pod on the specified node to delete a file
 func runNodeDeletePod(ctx context.Context, client kubernetes.Interface, nodeName, hostDir, filePath string) error {
-podName := "csi-snapshot-delete-" + uuid.New().String()[:8]
-namespace := "kube-system"
+	podName := "csi-snapshot-delete-" + uuid.New().String()[:8]
+	namespace := "kube-system"
 
-pod := &corev1.Pod{
-ObjectMeta: metav1.ObjectMeta{
-Name:      podName,
-Namespace: namespace,
-},
-Spec: corev1.PodSpec{
-NodeSelector: map[string]string{
-"kubernetes.io/hostname": nodeName,
-},
-RestartPolicy: corev1.RestartPolicyNever,
-Containers: []corev1.Container{
-{
-Name:    "delete",
-Image:   "busybox:latest",
-Command: []string{"/bin/sh", "-c"},
-Args: []string{
-fmt.Sprintf("rm -f %s || true", filePath),
-},
-VolumeMounts: []corev1.VolumeMount{
-{
-Name:      "data-dir",
-MountPath: hostDir,
-},
-},
-},
-},
-Volumes: []corev1.Volume{
-{
-Name: "data-dir",
-VolumeSource: corev1.VolumeSource{
-HostPath: &corev1.HostPathVolumeSource{
-Path: hostDir,
-Type: func() *corev1.HostPathType { t := corev1.HostPathDirectoryOrCreate; return &t }(),
-},
-},
-},
-},
-},
-}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: namespace,
+		},
+		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				"kubernetes.io/hostname": nodeName,
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:    "delete",
+					Image:   "busybox:latest",
+					Command: []string{"/bin/sh", "-c"},
+					Args: []string{
+						fmt.Sprintf("rm -f %s || true", filePath),
+					},
+					VolumeMounts: []corev1.VolumeMount{
+						{
+							Name:      "data-dir",
+							MountPath: hostDir,
+						},
+					},
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "data-dir",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: hostDir,
+							Type: func() *corev1.HostPathType { t := corev1.HostPathDirectoryOrCreate; return &t }(),
+						},
+					},
+				},
+			},
+		},
+	}
 
-if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
-return fmt.Errorf("failed to create delete pod: %v", err)
-}
-defer func() {
-_ = client.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
-}()
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("failed to create delete pod: %v", err)
+	}
+	defer func() {
+		_ = client.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
+	}()
 
-// Wait for pod to complete
-timeout := time.After(30 * time.Second)
-ticker := time.NewTicker(2 * time.Second)
-defer ticker.Stop()
+	// Wait for pod to complete
+	timeout := time.After(30 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
-for {
-select {
-case <-timeout:
-return fmt.Errorf("timeout waiting for delete pod to complete")
-case <-ticker.C:
-p, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
-if err != nil {
-return fmt.Errorf("failed to get pod status: %v", err)
-}
-if p.Status.Phase == corev1.PodSucceeded {
-return nil
-}
-if p.Status.Phase == corev1.PodFailed {
-// Ignore failures for delete (file may not exist)
-return nil
-}
-}
-}
+	for {
+		select {
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for delete pod to complete")
+		case <-ticker.C:
+			p, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to get pod status: %v", err)
+			}
+			if p.Status.Phase == corev1.PodSucceeded {
+				return nil
+			}
+			if p.Status.Phase == corev1.PodFailed {
+				// Ignore failures for delete (file may not exist)
+				return nil
+			}
+		}
+	}
 }
 
 // fileExistsOnNode checks if a file exists on a specific node
 func fileExistsOnNode(ctx context.Context, client kubernetes.Interface, nodeName, hostDir, fileName string) (bool, error) {
-podName := "csi-snapshot-check-" + uuid.New().String()[:8]
-namespace := "kube-system"
+	podName := "csi-snapshot-check-" + uuid.New().String()[:8]
+	namespace := "kube-system"
 
-pod := &corev1.Pod{
-ObjectMeta: metav1.ObjectMeta{
-Name:      podName,
-Namespace: namespace,
-},
-Spec: corev1.PodSpec{
-NodeSelector: map[string]string{
-"kubernetes.io/hostname": nodeName,
-},
-RestartPolicy: corev1.RestartPolicyNever,
-Containers: []corev1.Container{
-{
-Name:    "check",
-Image:   "busybox:latest",
-Command: []string{"/bin/sh", "-c"},
-Args: []string{
-fmt.Sprintf("test -f %s/%s", hostDir, fileName),
-},
-VolumeMounts: []corev1.VolumeMount{
-{
-Name:      "data-dir",
-MountPath: hostDir,
-},
-},
-},
-},
-Volumes: []corev1.Volume{
-{
-Name: "data-dir",
-VolumeSource: corev1.VolumeSource{
-HostPath: &corev1.HostPathVolumeSource{
-Path: hostDir,
-Type: func() *corev1.HostPathType { t := corev1.HostPathDirectoryOrCreate; return &t }(),
-},
-},
-},
-},
-},
-}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: namespace,
+		},
+		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				"kubernetes.io/hostname": nodeName,
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:    "check",
+					Image:   "busybox:latest",
+					Command: []string{"/bin/sh", "-c"},
+					Args: []string{
+						fmt.Sprintf("test -f %s/%s", hostDir, fileName),
+					},
+					VolumeMounts: []corev1.VolumeMount{
+						{
+							Name:      "data-dir",
+							MountPath: hostDir,
+						},
+					},
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "data-dir",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: hostDir,
+							Type: func() *corev1.HostPathType { t := corev1.HostPathDirectoryOrCreate; return &t }(),
+						},
+					},
+				},
+			},
+		},
+	}
 
-if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
-return false, fmt.Errorf("failed to create check pod: %v", err)
-}
-defer func() {
-_ = client.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
-}()
+	if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		return false, fmt.Errorf("failed to create check pod: %v", err)
+	}
+	defer func() {
+		_ = client.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
+	}()
 
-// Wait for pod to complete
-timeout := time.After(30 * time.Second)
-ticker := time.NewTicker(2 * time.Second)
-defer ticker.Stop()
+	// Wait for pod to complete
+	timeout := time.After(30 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 
-for {
-select {
-case <-timeout:
-return false, fmt.Errorf("timeout waiting for check pod to complete")
-case <-ticker.C:
-p, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
-if err != nil {
-return false, fmt.Errorf("failed to get pod status: %v", err)
-}
-if p.Status.Phase == corev1.PodSucceeded {
-return true, nil
-}
-if p.Status.Phase == corev1.PodFailed {
-return false, nil
-}
-}
-}
+	for {
+		select {
+		case <-timeout:
+			return false, fmt.Errorf("timeout waiting for check pod to complete")
+		case <-ticker.C:
+			p, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+			if err != nil {
+				return false, fmt.Errorf("failed to get pod status: %v", err)
+			}
+			if p.Status.Phase == corev1.PodSucceeded {
+				return true, nil
+			}
+			if p.Status.Phase == corev1.PodFailed {
+				return false, nil
+			}
+		}
+	}
 }
 
 // timestampProto creates a protobuf Timestamp from a time.Time

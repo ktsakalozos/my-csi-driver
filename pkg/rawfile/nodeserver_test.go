@@ -221,85 +221,85 @@ func TestNode_GarbageCollectVolumes(t *testing.T) {
 }
 
 func TestNode_PublishVolume_RestoreFromSnapshot(t *testing.T) {
-clientset := fake.NewSimpleClientset()
-testDir := t.TempDir()
+	clientset := fake.NewSimpleClientset()
+	testDir := t.TempDir()
 
-ns := NewNodeServer("test-node", "test-driver", testDir, clientset)
+	ns := NewNodeServer("test-node", "test-driver", testDir, clientset)
 
-volID := "vol-restored"
-snapID := "snap-source-123"
-backingFile := filepath.Join(testDir, volID+".img")
-snapFile := filepath.Join(testDir, "snap-"+snapID+".img")
+	volID := "vol-restored"
+	snapID := "snap-source-123"
+	backingFile := filepath.Join(testDir, volID+".img")
+	snapFile := filepath.Join(testDir, "snap-"+snapID+".img")
 
-// Create the snapshot file first
-if err := os.WriteFile(snapFile, []byte("snapshot data content"), 0644); err != nil {
-t.Fatalf("failed to create snapshot file: %v", err)
-}
+	// Create the snapshot file first
+	if err := os.WriteFile(snapFile, []byte("snapshot data content"), 0644); err != nil {
+		t.Fatalf("failed to create snapshot file: %v", err)
+	}
 
-nodeReq := &csi.NodePublishVolumeRequest{
-VolumeId:   volID,
-TargetPath: filepath.Join(testDir, "test-mount-restore"),
-VolumeContext: map[string]string{
-"backingFile":          backingFile,
-"size":                 "1048576", // 1 MiB
-"restoreFromSnapshot":  snapID,
-"snapshotFile":         snapFile,
-},
-VolumeCapability: &csi.VolumeCapability{AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{FsType: "ext4"}}},
-}
+	nodeReq := &csi.NodePublishVolumeRequest{
+		VolumeId:   volID,
+		TargetPath: filepath.Join(testDir, "test-mount-restore"),
+		VolumeContext: map[string]string{
+			"backingFile":         backingFile,
+			"size":                "1048576", // 1 MiB
+			"restoreFromSnapshot": snapID,
+			"snapshotFile":        snapFile,
+		},
+		VolumeCapability: &csi.VolumeCapability{AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{FsType: "ext4"}}},
+	}
 
-// Try to publish (will fail at losetup if not root, but backing file should be created)
-if _, err := ns.NodePublishVolume(context.Background(), nodeReq); err != nil {
-t.Logf("NodePublishVolume returned error (expected if not root): %v", err)
-}
+	// Try to publish (will fail at losetup if not root, but backing file should be created)
+	if _, err := ns.NodePublishVolume(context.Background(), nodeReq); err != nil {
+		t.Logf("NodePublishVolume returned error (expected if not root): %v", err)
+	}
 
-// Verify the backing file was restored from snapshot
-if info, err := os.Stat(backingFile); err != nil {
-t.Errorf("backing file not created: %v", err)
-} else if info.Size() == 0 {
-t.Errorf("backing file is empty, expected snapshot content")
-} else {
-// Verify content was copied
-content, err := os.ReadFile(backingFile)
-if err != nil {
-t.Errorf("failed to read backing file: %v", err)
-} else if string(content) != "snapshot data content" {
-t.Errorf("backing file content mismatch, got: %s", string(content))
-} else {
-t.Logf("Backing file successfully restored from snapshot")
-}
-}
+	// Verify the backing file was restored from snapshot
+	if info, err := os.Stat(backingFile); err != nil {
+		t.Errorf("backing file not created: %v", err)
+	} else if info.Size() == 0 {
+		t.Errorf("backing file is empty, expected snapshot content")
+	} else {
+		// Verify content was copied
+		content, err := os.ReadFile(backingFile)
+		if err != nil {
+			t.Errorf("failed to read backing file: %v", err)
+		} else if string(content) != "snapshot data content" {
+			t.Errorf("backing file content mismatch, got: %s", string(content))
+		} else {
+			t.Logf("Backing file successfully restored from snapshot")
+		}
+	}
 
-// Cleanup
-os.RemoveAll(nodeReq.TargetPath)
-os.Remove(backingFile)
-os.Remove(snapFile)
+	// Cleanup
+	os.RemoveAll(nodeReq.TargetPath)
+	os.Remove(backingFile)
+	os.Remove(snapFile)
 }
 
 func TestCopyFile(t *testing.T) {
-testDir := t.TempDir()
+	testDir := t.TempDir()
 
-srcFile := filepath.Join(testDir, "source.txt")
-dstFile := filepath.Join(testDir, "dest.txt")
+	srcFile := filepath.Join(testDir, "source.txt")
+	dstFile := filepath.Join(testDir, "dest.txt")
 
-// Create source file
-testContent := "test file content for copy"
-if err := os.WriteFile(srcFile, []byte(testContent), 0644); err != nil {
-t.Fatalf("failed to create source file: %v", err)
-}
+	// Create source file
+	testContent := "test file content for copy"
+	if err := os.WriteFile(srcFile, []byte(testContent), 0644); err != nil {
+		t.Fatalf("failed to create source file: %v", err)
+	}
 
-// Copy file
-if err := copyFile(srcFile, dstFile); err != nil {
-t.Fatalf("copyFile failed: %v", err)
-}
+	// Copy file
+	if err := copyFile(srcFile, dstFile); err != nil {
+		t.Fatalf("copyFile failed: %v", err)
+	}
 
-// Verify destination file
-content, err := os.ReadFile(dstFile)
-if err != nil {
-t.Fatalf("failed to read destination file: %v", err)
-}
+	// Verify destination file
+	content, err := os.ReadFile(dstFile)
+	if err != nil {
+		t.Fatalf("failed to read destination file: %v", err)
+	}
 
-if string(content) != testContent {
-t.Errorf("content mismatch: expected %q, got %q", testContent, string(content))
-}
+	if string(content) != testContent {
+		t.Errorf("content mismatch: expected %q, got %q", testContent, string(content))
+	}
 }
