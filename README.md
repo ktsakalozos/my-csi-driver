@@ -151,6 +151,26 @@ Snapshot integration tests cover:
 - NodePublishVolume restore from snapshot (requires root)
 - ListSnapshots RPC
 
+### E2E Tests
+
+End-to-end tests validate the full snapshot workflow in a Kind cluster:
+
+```bash
+# Build and test locally (requires kind, kubectl, helm)
+make build IMG=my-csi-driver:test
+make e2e-snapshot-tests IMG=my-csi-driver:test REGISTRY=my-csi-driver
+```
+
+The snapshot e2e test:
+1. Installs snapshot CRDs from kubernetes-csi/external-snapshotter
+2. Deploys the CSI driver with snapshot sidecar
+3. Creates a VolumeSnapshotClass
+4. Creates a source volume with test data
+5. Creates a snapshot of the source volume
+6. Restores a new volume from the snapshot
+7. Verifies the restored data matches the original
+8. Tests snapshot deletion
+
 CI: See `.github/workflows/e2e-kind.yaml` for a full Kind-based e2e that:
 - Removes the default local-path StorageClass
 - Installs the chart, waits for readiness
