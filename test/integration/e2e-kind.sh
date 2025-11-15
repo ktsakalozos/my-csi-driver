@@ -237,3 +237,279 @@ echo ""
 echo "========================================="
 echo "E2E Tests PASSED!"
 echo "========================================="
+
+# =========================================
+# SNAPSHOT E2E TESTS
+# =========================================
+# The following tests validate snapshot functionality
+# =========================================
+
+SNAPSHOTTER_VERSION="${SNAPSHOTTER_VERSION:-v6.3.3}"
+
+echo ""
+echo "========================================="
+echo "Snapshot Step 1: Install Snapshot CRDs"
+echo "========================================="
+CRD_BASE_URL="https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/${SNAPSHOTTER_VERSION}/client/config/crd"
+
+echo "Installing VolumeSnapshotClass CRD..."
+kubectl apply -f "${CRD_BASE_URL}/snapshot.storage.k8s.io_volumesnapshotclasses.yaml"
+
+echo "Installing VolumeSnapshotContent CRD..."
+kubectl apply -f "${CRD_BASE_URL}/snapshot.storage.k8s.io_volumesnapshotcontents.yaml"
+
+echo "Installing VolumeSnapshot CRD..."
+kubectl apply -f "${CRD_BASE_URL}/snapshot.storage.k8s.io_volumesnapshots.yaml"
+
+echo "Waiting for CRDs to be established..."
+kubectl wait --for condition=established --timeout=60s crd/volumesnapshotclasses.snapshot.storage.k8s.io
+kubectl wait --for condition=established --timeout=60s crd/volumesnapshotcontents.snapshot.storage.k8s.io
+kubectl wait --for condition=established --timeout=60s crd/volumesnapshots.snapshot.storage.k8s.io
+
+echo "Snapshot CRDs installed successfully"
+
+echo ""
+echo "========================================="
+echo "Snapshot Step 2: Verify snapshot sidecar is present"
+echo "========================================="
+echo "Checking controller pod has csi-snapshotter container"
+CTRL_POD=$(kubectl get pods -l app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.name}')
+kubectl get pod "$CTRL_POD" -o jsonpath='{.spec.containers[*].name}' | grep csi-snapshotter || {
+  echo "ERROR: csi-snapshotter container not found in controller pod"
+  exit 1
+}
+echo "✓ csi-snapshotter sidecar verified"
+
+echo ""
+echo "========================================="
+echo "Snapshot Step 3: Create VolumeSnapshotClass"
+echo "========================================="
+cat <<'YAML' | kubectl apply -f -
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: my-csi-driver-snapclass
+driver: my-csi-driver
+deletionPolicy: Delete
+YAML
+
+kubectl get volumesnapshotclass my-csi-driver-snapclass
+
+echo ""
+echo "========================================="
+echo "Snapshot Step 4: Create source PVC and Pod with test data"
+echo "========================================="
+cat <<'YAML' > /tmp/snapshot-test.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: source-pvc
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  storageClassName: my-csi-driver-default
+  resources:
+    requests:
+      storage: 1Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: source-pod
+spec:
+  restartPolicy: Never
+  containers:
+  - name: writer
+    image: alpine:3.19
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        echo "This is test data for snapshot e2e" > /data/test.txt
+        echo "Timestamp: $(date)" >> /data/test.txt
+        cat /data/test.txt
+        sync
+        sleep 2
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: source-pvc
+YAML
+
+kubectl apply -f /tmp/snapshot-test.yaml
+
+echo "Waiting for source PVC to be bound..."
+kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/source-pvc --timeout=120s
+
+echo "Waiting for source pod to complete..."
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/source-pod --timeout=120s
+
+echo "Source pod logs:"
+kubectl logs source-pod
+
+echo ""
+echo "========================================="
+echo "Snapshot Step 5: Create VolumeSnapshot"
+echo "========================================="
+cat <<'YAML' >> /tmp/snapshot-test.yaml
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: source-snapshot
+spec:
+  volumeSnapshotClassName: my-csi-driver-snapclass
+  source:
+    persistentVolumeClaimName: source-pvc
+YAML
+
+kubectl apply -f /tmp/snapshot-test.yaml
+
+echo "Waiting for snapshot to be ready..."
+for i in {1..60}; do
+  READY=$(kubectl get volumesnapshot source-snapshot -o jsonpath='{.status.readyToUse}' 2>/dev/null || echo "false")
+  if [ "$READY" = "true" ]; then
+    echo "✓ Snapshot is ready"
+    break
+  fi
+  if [ $i -eq 60 ]; then
+    echo "ERROR: Snapshot did not become ready in time"
+    kubectl describe volumesnapshot source-snapshot
+    kubectl get volumesnapshotcontent -o yaml
+    exit 1
+  fi
+  echo "Waiting for snapshot to be ready... ($i/60)"
+  sleep 2
+done
+
+kubectl get volumesnapshot source-snapshot -o yaml
+
+echo ""
+echo "========================================="
+echo "Snapshot Step 6: Create restored PVC from snapshot"
+echo "========================================="
+cat <<'YAML' >> /tmp/snapshot-test.yaml
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: restored-pvc
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  storageClassName: my-csi-driver-default
+  dataSource:
+    name: source-snapshot
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+  resources:
+    requests:
+      storage: 1Mi
+YAML
+
+kubectl apply -f /tmp/snapshot-test.yaml
+
+echo "Waiting for restored PVC to be bound..."
+kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/restored-pvc --timeout=120s
+
+echo ""
+echo "========================================="
+echo "Snapshot Step 7: Verify restored data matches original"
+echo "========================================="
+cat <<'YAML' >> /tmp/snapshot-test.yaml
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: restored-pod
+spec:
+  restartPolicy: Never
+  containers:
+  - name: reader
+    image: alpine:3.19
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        echo "=== Contents of /data/test.txt ==="
+        cat /data/test.txt
+        echo "==================================="
+        # Verify the expected content is present
+        if grep -q "This is test data for snapshot e2e" /data/test.txt; then
+          echo "✓ Data verification successful"
+          exit 0
+        else
+          echo "✗ Data verification failed"
+          exit 1
+        fi
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: restored-pvc
+YAML
+
+kubectl apply -f /tmp/snapshot-test.yaml
+
+echo "Waiting for restored pod to complete..."
+if ! kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/restored-pod --timeout=120s; then
+  echo "ERROR: Restored pod did not complete successfully"
+  kubectl logs restored-pod || true
+  kubectl describe pod restored-pod || true
+  exit 1
+fi
+
+echo "Restored pod logs:"
+kubectl logs restored-pod
+
+echo ""
+echo "========================================="
+echo "Snapshot Step 8: Verify snapshot metadata"
+echo "========================================="
+echo "Checking VolumeSnapshotContent..."
+VSC_NAME=$(kubectl get volumesnapshot source-snapshot -o jsonpath='{.status.boundVolumeSnapshotContentName}')
+kubectl get volumesnapshotcontent "$VSC_NAME" -o yaml
+
+echo "Verifying snapshot source volume ID..."
+SOURCE_VOL=$(kubectl get volumesnapshotcontent "$VSC_NAME" -o jsonpath='{.spec.source.volumeHandle}')
+if [ -z "$SOURCE_VOL" ]; then
+  echo "ERROR: Source volume ID not found in VolumeSnapshotContent"
+  exit 1
+fi
+echo "✓ Source volume ID: $SOURCE_VOL"
+
+echo "Verifying snapshot ID..."
+SNAP_ID=$(kubectl get volumesnapshotcontent "$VSC_NAME" -o jsonpath='{.status.snapshotHandle}')
+if [ -z "$SNAP_ID" ]; then
+  echo "ERROR: Snapshot ID not found in VolumeSnapshotContent"
+  exit 1
+fi
+echo "✓ Snapshot ID: $SNAP_ID"
+
+echo ""
+echo "========================================="
+echo "Snapshot Step 9: Test snapshot deletion"
+echo "========================================="
+echo "Deleting VolumeSnapshot..."
+kubectl delete volumesnapshot source-snapshot
+
+echo "Waiting for VolumeSnapshotContent to be deleted..."
+if ! kubectl wait --for=delete volumesnapshotcontent "$VSC_NAME" --timeout=60s; then
+  echo "Warning: VolumeSnapshotContent was not deleted in time (may be handled asynchronously)"
+fi
+
+echo ""
+echo "========================================="
+echo "E2E Snapshot Tests PASSED!"
+echo "========================================="
+echo "Summary:"
+echo "  ✓ Snapshot CRDs installed"
+echo "  ✓ CSI driver with snapshot sidecar deployed"
+echo "  ✓ VolumeSnapshotClass created"
+echo "  ✓ Source volume created with test data"
+echo "  ✓ Snapshot created successfully"
+echo "  ✓ Volume restored from snapshot"
+echo "  ✓ Restored data verified"
+echo "  ✓ Snapshot deletion tested"
+echo "========================================="

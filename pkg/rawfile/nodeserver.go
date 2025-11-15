@@ -3,6 +3,7 @@ package rawfile
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -60,6 +61,10 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, fmt.Errorf("invalid size in volume context: %v", err)
 	}
 
+	// Check for restore from snapshot context
+	snapID, restore := req.VolumeContext["restoreFromSnapshot"]
+	snapFile := req.VolumeContext["snapshotFile"]
+
 	// Just-in-time creation: Create backing file if it doesn't exist
 	if _, statErr := os.Stat(backingFile); statErr != nil {
 		if os.IsNotExist(statErr) {
@@ -71,17 +76,25 @@ func (ns *NodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 				return nil, fmt.Errorf("failed to create backing directory: %v", err)
 			}
 
-			// Create backing file
-			f, err := os.Create(backingFile)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create backing file: %v", err)
-			}
-			if err := f.Truncate(size); err != nil {
+			// If restoring, copy snapshot file; else create empty
+			if restore && snapID != "" && snapFile != "" {
+				klog.Infof("Restoring %s from snapshot %s (%s)", backingFile, snapID, snapFile)
+				if err := copyFile(snapFile, backingFile); err != nil {
+					return nil, fmt.Errorf("failed to restore from snapshot: %v", err)
+				}
+			} else {
+				// Create backing file
+				f, err := os.Create(backingFile)
+				if err != nil {
+					return nil, fmt.Errorf("failed to create backing file: %v", err)
+				}
+				if err := f.Truncate(size); err != nil {
+					f.Close()
+					return nil, fmt.Errorf("failed to truncate backing file: %v", err)
+				}
 				f.Close()
-				return nil, fmt.Errorf("failed to truncate backing file: %v", err)
+				klog.Infof("Created backing file %s with size %d bytes", backingFile, size)
 			}
-			f.Close()
-			klog.Infof("Created backing file %s with size %d bytes", backingFile, size)
 		} else {
 			return nil, fmt.Errorf("backing file %s not accessible on node: %v", backingFile, statErr)
 		}
@@ -341,4 +354,22 @@ func (ns *NodeServer) RunGarbageCollector(ctx context.Context, interval time.Dur
 			ns.garbageCollectVolumes(ctx)
 		}
 	}
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = out.Close() }()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
 }

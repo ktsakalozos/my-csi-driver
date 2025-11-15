@@ -136,7 +136,7 @@ make push IMG=ghcr.io/<owner>/my-csi-driver:dev
 
 ## Testing
 
-Unit and integration tests are included. Integration tests exercise controller and node paths separately. The node test requires root and system tools (losetup, mkfs.ext4, mount, umount) and will be skipped otherwise.
+Unit and integration tests are included. Integration tests exercise controller and node paths separately, including snapshot functionality. The node test requires root and system tools (losetup, mkfs.ext4, mount, umount) and will be skipped otherwise.
 
 Run locally:
 
@@ -145,11 +145,40 @@ make test         # unit tests
 make integration-test  # controller + node integration (node requires sudo/tools)
 ```
 
+Snapshot integration tests cover:
+- Controller capability advertisement (CREATE_DELETE_SNAPSHOT, LIST_SNAPSHOTS)
+- CreateVolume from snapshot with restore metadata
+- NodePublishVolume restore from snapshot (requires root)
+- ListSnapshots RPC
+
+### E2E Tests
+
+End-to-end tests validate the full workflow including snapshots in a Kind cluster:
+
+```bash
+# Build and test locally (requires kind, kubectl, helm)
+make build IMG=my-csi-driver:test
+make e2e-tests IMG=my-csi-driver:test REGISTRY=my-csi-driver
+```
+
+The e2e tests include:
+- Basic volume provisioning and pod mounting
+- **Snapshot workflow**:
+  1. Installs snapshot CRDs from kubernetes-csi/external-snapshotter
+  2. Deploys the CSI driver with snapshot sidecar
+  3. Creates a VolumeSnapshotClass
+  4. Creates a source volume with test data
+  5. Creates a snapshot of the source volume
+  6. Restores a new volume from the snapshot
+  7. Verifies the restored data matches the original
+  8. Tests snapshot deletion
+
 CI: See `.github/workflows/e2e-kind.yaml` for a full Kind-based e2e that:
 - Removes the default local-path StorageClass
 - Installs the chart, waits for readiness
 - Verifies controller/node modes and RBAC
 - Creates a PVC + Pod and validates dynamic provisioning
+- Tests snapshot creation, restoration, and deletion
 
 ## Configuration
 

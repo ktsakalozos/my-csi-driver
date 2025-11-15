@@ -59,6 +59,18 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+        - name: csi-snapshotter
+          image: {{ .Values.controller.snapshotterImage }}
+          args:
+            - "--v=4"
+            - "--csi-address=$(ADDRESS)"
+            - "--leader-election=true"
+          env:
+            - name: ADDRESS
+              value: /csi/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
       volumes:
         - name: socket-dir
           emptyDir: {}
