@@ -24,7 +24,7 @@ endif
 GO_BUILD_FLAGS ?=
 DOCKER_BUILD_ARGS ?=
 
-.PHONY: all build push run clean fmt vet test help integration-test e2e-tests e2e-snapshot-tests
+.PHONY: all build push run clean fmt vet test help integration-test e2e-tests
 
 all: build
 
@@ -38,8 +38,7 @@ help:
 	@echo "  make all   IMG=ghcr.io/<user>/my-csi-driver:tag"
 	@echo "  make run   IMG=my-csi-driver:dev CSI_ENDPOINT=unix:///csi/csi.sock CSI_BACKING_DIR=/data"
 	@echo "  make integration-test   # run integration tests (requires 'csc' in PATH)"
-	@echo "  make e2e-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>   # run e2e tests (including snapshots) in kind cluster"
-	@echo "  make e2e-snapshot-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>   # alias for e2e-tests (backward compat)"
+	@echo "  make e2e-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>   # run e2e tests in kind cluster"
 	@echo
 	@echo "Variables (overridable):"
 	@echo "  REGISTRY           Optional registry prefix (e.g., ghcr.io/<user>)"
@@ -60,8 +59,7 @@ help:
 	@echo "  vet                 Run 'go vet ./...'"
 	@echo "  test                Run 'go test ./... -v'"
 	@echo "  integration-test    Run 'go test -tags=integration ./test/integration -v' (requires 'csc')"
-	@echo "  e2e-tests           Run end-to-end tests including snapshots in kind cluster (requires kind, kubectl, helm)"
-	@echo "  e2e-snapshot-tests  Alias for e2e-tests (backward compatibility)"
+	@echo "  e2e-tests           Run end-to-end tests in kind cluster (requires kind, kubectl, helm)"
 	@echo "  clean               No-op; use 'docker system prune -f' if needed"
 	@echo
 	@echo "Current IMG: $(IMG)"
@@ -133,16 +131,6 @@ e2e-tests:
 	@if ! command -v helm &> /dev/null; then echo "helm is required but not found in PATH"; exit 1; fi
 	@echo "Running e2e tests with IMG=$(IMG), REGISTRY=$(REGISTRY)"
 	IMG=$(IMG) REGISTRY=$(REGISTRY) KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) SKIP_CLEANUP=$(SKIP_CLEANUP) ./test/integration/e2e-kind.sh
-
-# Run end-to-end snapshot tests in a kind cluster
-# Note: Snapshot tests are now integrated into the main e2e-tests target
-# This target is kept for backward compatibility and calls e2e-tests
-# Optional variables:
-#   - SKIP_SNAPSHOT_TESTS (set to 'true' to skip snapshot tests)
-#   - SNAPSHOTTER_VERSION (default: v6.3.3)
-# Example:
-#   make e2e-snapshot-tests IMG=ghcr.io/user/my-csi-driver:tag REGISTRY=ghcr.io/user
-e2e-snapshot-tests: e2e-tests
 
 clean:
 	@echo "Nothing to clean for container image; docker system prune -f if needed."

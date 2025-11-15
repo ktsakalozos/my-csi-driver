@@ -173,8 +173,6 @@ The e2e tests include:
   7. Verifies the restored data matches the original
   8. Tests snapshot deletion
 
-To skip snapshot tests, set `SKIP_SNAPSHOT_TESTS=true`.
-
 CI: See `.github/workflows/e2e-kind.yaml` for a full Kind-based e2e that:
 - Removes the default local-path StorageClass
 - Installs the chart, waits for readiness

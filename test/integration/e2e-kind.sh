@@ -242,16 +242,7 @@ echo "========================================="
 # SNAPSHOT E2E TESTS
 # =========================================
 # The following tests validate snapshot functionality
-# Skip if SKIP_SNAPSHOT_TESTS is set to 'true'
 # =========================================
-
-if [ "${SKIP_SNAPSHOT_TESTS:-false}" = "true" ]; then
-  echo ""
-  echo "========================================="
-  echo "Skipping snapshot tests (SKIP_SNAPSHOT_TESTS=true)"
-  echo "========================================="
-  exit 0
-fi
 
 SNAPSHOTTER_VERSION="${SNAPSHOTTER_VERSION:-v6.3.3}"
 
