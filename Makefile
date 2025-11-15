@@ -38,8 +38,8 @@ help:
 	@echo "  make all   IMG=ghcr.io/<user>/my-csi-driver:tag"
 	@echo "  make run   IMG=my-csi-driver:dev CSI_ENDPOINT=unix:///csi/csi.sock CSI_BACKING_DIR=/data"
 	@echo "  make integration-test   # run integration tests (requires 'csc' in PATH)"
-	@echo "  make e2e-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>   # run e2e tests in kind cluster"
-	@echo "  make e2e-snapshot-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>   # run e2e snapshot tests in kind cluster"
+	@echo "  make e2e-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>   # run e2e tests (including snapshots) in kind cluster"
+	@echo "  make e2e-snapshot-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>   # alias for e2e-tests (backward compat)"
 	@echo
 	@echo "Variables (overridable):"
 	@echo "  REGISTRY           Optional registry prefix (e.g., ghcr.io/<user>)"
@@ -60,8 +60,8 @@ help:
 	@echo "  vet                 Run 'go vet ./...'"
 	@echo "  test                Run 'go test ./... -v'"
 	@echo "  integration-test    Run 'go test -tags=integration ./test/integration -v' (requires 'csc')"
-	@echo "  e2e-tests           Run end-to-end tests in kind cluster (requires kind, kubectl, helm)"
-	@echo "  e2e-snapshot-tests  Run end-to-end snapshot tests in kind cluster (requires kind, kubectl, helm)"
+	@echo "  e2e-tests           Run end-to-end tests including snapshots in kind cluster (requires kind, kubectl, helm)"
+	@echo "  e2e-snapshot-tests  Alias for e2e-tests (backward compatibility)"
 	@echo "  clean               No-op; use 'docker system prune -f' if needed"
 	@echo
 	@echo "Current IMG: $(IMG)"
@@ -135,23 +135,14 @@ e2e-tests:
 	IMG=$(IMG) REGISTRY=$(REGISTRY) KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) SKIP_CLEANUP=$(SKIP_CLEANUP) ./test/integration/e2e-kind.sh
 
 # Run end-to-end snapshot tests in a kind cluster
-# This target requires:
-#   - kind, kubectl, and helm installed
-#   - IMG and REGISTRY variables set
+# Note: Snapshot tests are now integrated into the main e2e-tests target
+# This target is kept for backward compatibility and calls e2e-tests
 # Optional variables:
-#   - KIND_CLUSTER_NAME (default: csi-snapshot-e2e)
-#   - SKIP_CLEANUP (default: false)
+#   - SKIP_SNAPSHOT_TESTS (set to 'true' to skip snapshot tests)
 #   - SNAPSHOTTER_VERSION (default: v6.3.3)
 # Example:
 #   make e2e-snapshot-tests IMG=ghcr.io/user/my-csi-driver:tag REGISTRY=ghcr.io/user
-e2e-snapshot-tests:
-	@if [ -z "$(IMG)" ]; then echo "IMG is required (e.g. make e2e-snapshot-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>)"; exit 1; fi
-	@if [ -z "$(REGISTRY)" ]; then echo "REGISTRY is required (e.g. make e2e-snapshot-tests IMG=ghcr.io/<user>/my-csi-driver:tag REGISTRY=ghcr.io/<user>)"; exit 1; fi
-	@if ! command -v kind &> /dev/null; then echo "kind is required but not found in PATH"; exit 1; fi
-	@if ! command -v kubectl &> /dev/null; then echo "kubectl is required but not found in PATH"; exit 1; fi
-	@if ! command -v helm &> /dev/null; then echo "helm is required but not found in PATH"; exit 1; fi
-	@echo "Running e2e snapshot tests with IMG=$(IMG), REGISTRY=$(REGISTRY)"
-	IMG=$(IMG) REGISTRY=$(REGISTRY) KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) SKIP_CLEANUP=$(SKIP_CLEANUP) SNAPSHOTTER_VERSION=$(SNAPSHOTTER_VERSION) ./test/integration/e2e-snapshot-kind.sh
+e2e-snapshot-tests: e2e-tests
 
 clean:
 	@echo "Nothing to clean for container image; docker system prune -f if needed."
