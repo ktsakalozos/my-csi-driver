@@ -136,7 +136,7 @@ make push IMG=ghcr.io/<owner>/my-csi-driver:dev
 
 ## Testing
 
-Unit and integration tests are included. Integration tests exercise controller and node paths separately. The node test requires root and system tools (losetup, mkfs.ext4, mount, umount) and will be skipped otherwise.
+Unit and integration tests are included. Integration tests exercise controller and node paths separately, including snapshot functionality. The node test requires root and system tools (losetup, mkfs.ext4, mount, umount) and will be skipped otherwise.
 
 Run locally:
 
@@ -144,6 +144,12 @@ Run locally:
 make test         # unit tests
 make integration-test  # controller + node integration (node requires sudo/tools)
 ```
+
+Snapshot integration tests cover:
+- Controller capability advertisement (CREATE_DELETE_SNAPSHOT, LIST_SNAPSHOTS)
+- CreateVolume from snapshot with restore metadata
+- NodePublishVolume restore from snapshot (requires root)
+- ListSnapshots RPC
 
 CI: See `.github/workflows/e2e-kind.yaml` for a full Kind-based e2e that:
 - Removes the default local-path StorageClass
